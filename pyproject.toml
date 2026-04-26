@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cad2urdf"
+version = "0.1.0a0"
+description = "Convert CAD assemblies (STEP/STL/OBJ) to ROS-ready URDF packages"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "boelnasr" }]
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24,<3",
+    "trimesh>=4.0",
+    "pythonOCC-core>=7.7",
+    "PyYAML>=6.0",
+    "manipulapy>=1.3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=4",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "types-PyYAML",
+]
+
+[project.scripts]
+cad2urdf = "cad2urdf.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q --strict-markers"
+markers = [
+    "slow: long-running integration tests",
+    "needs_step_fixture: requires generated STEP fixtures",
+]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["src/cad2urdf/core"]
+[[tool.mypy.overrides]]
+module = ["trimesh.*", "OCC.*", "manipulapy.*"]
+ignore_missing_imports = true
