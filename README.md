@@ -27,6 +27,8 @@ STL/OBJ inputs work in this mode; STEP-related features will raise `ImportError`
 
 ## Quick start
 
+> Note: forward-looking — implementation lands in Phase 8 of v0.1.0a0. The command below shows the target API.
+
 ```bash
 cad2urdf input.step --joints joints.yaml -o my_robot/
 ```
