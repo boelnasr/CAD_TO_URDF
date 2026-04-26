@@ -28,3 +28,16 @@ def test_override_validates_inertia_shape() -> None:
 
     with pytest.raises(ValueError, match="inertia must be shape"):
         InertialOverride(inertia=np.zeros((2, 2)))
+
+
+def test_override_validates_negative_mass() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="mass must be non-negative"):
+        InertialOverride(mass=-1.0)
+
+
+def test_override_coerces_int_arrays_to_float() -> None:
+    o = InertialOverride(com=np.zeros(3, dtype=np.int32))
+    assert o.com is not None
+    assert o.com.dtype == np.float64
