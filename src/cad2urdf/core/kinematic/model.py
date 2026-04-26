@@ -95,3 +95,24 @@ class Joint:
             raise ValueError(
                 f"limit_lower ({self.limit_lower}) must be <= limit_upper ({self.limit_upper})"
             )
+
+
+@dataclass
+class Robot:
+    """Top-level robot description."""
+
+    name: str
+    base_link: str
+    links: dict[str, Link]
+    joints: dict[str, Joint]
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("name must not be empty")
+        if self.base_link not in self.links:
+            raise ValueError(f"base_link {self.base_link!r} not in links")
+        for jn, j in self.joints.items():
+            if j.parent not in self.links or j.child not in self.links:
+                raise ValueError(
+                    f"joint {jn!r} references unknown link (parent={j.parent!r}, child={j.child!r})"
+                )
