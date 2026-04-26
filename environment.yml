@@ -1,0 +1,9 @@
+name: cad2urdf
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pythonocc-core>=7.7
+  - pip
+  - pip:
+      - -e .[dev]
