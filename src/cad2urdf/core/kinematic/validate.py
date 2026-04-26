@@ -86,7 +86,12 @@ def _check_multi_parent(robot: Robot) -> list[ValidationIssue]:
 
 
 def _check_cycles(robot: Robot) -> list[ValidationIssue]:
-    """Walk parent-of upward from each link; revisit = cycle."""
+    """Walk parent-of upward from each link; revisit = cycle.
+
+    Emits one issue per link found to be part of a cycle. So a 3-cycle a->b->c->a
+    will produce 3 issues, one targeting each link. This is intentional - it
+    surfaces every link the user needs to inspect.
+    """
     issues: list[ValidationIssue] = []
     for start in robot.links:
         seen = {start}
@@ -116,8 +121,4 @@ def _check_cycles(robot: Robot) -> list[ValidationIssue]:
                 )
                 break
             seen.add(cur)
-    # de-duplicate by (kind, target)
-    uniq: dict[tuple[str, str], ValidationIssue] = {}
-    for i in issues:
-        uniq.setdefault((i.kind, i.target), i)
-    return list(uniq.values())
+    return issues
