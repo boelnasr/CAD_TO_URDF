@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
+
+JointType = Literal["revolute", "prismatic", "fixed", "continuous", "floating", "planar"]
+
+_VALID_JOINT_TYPES: frozenset[str] = frozenset(
+    {"revolute", "prismatic", "fixed", "continuous", "floating", "planar"}
+)
 
 
 @dataclass
@@ -50,3 +56,42 @@ class Link:
             raise ValueError(f"origin must be shape (4, 4), got {self.origin.shape}")
         if self.material_density <= 0:
             raise ValueError(f"material_density must be positive, got {self.material_density}")
+
+
+@dataclass
+class Joint:
+    """A constraint between two links."""
+
+    name: str
+    type: JointType
+    parent: str
+    child: str
+    axis: NDArray[Any]
+    origin: NDArray[Any] = field(default_factory=lambda: np.eye(4))
+    limit_lower: float | None = None
+    limit_upper: float | None = None
+    effort: float | None = None
+    velocity: float | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("name must not be empty")
+        if self.type not in _VALID_JOINT_TYPES:
+            raise ValueError(f"type must be one of {sorted(_VALID_JOINT_TYPES)}, got {self.type!r}")
+        if self.parent == self.child:
+            raise ValueError(f"parent and child must differ; both are {self.parent!r}")
+        if self.axis.shape != (3,):
+            raise ValueError(f"axis must be shape (3,), got {self.axis.shape}")
+        norm = float(np.linalg.norm(self.axis))
+        if not np.isclose(norm, 1.0, atol=1e-6):
+            raise ValueError(f"axis must be unit-length, got |a|={norm:.6f}")
+        if self.origin.shape != (4, 4):
+            raise ValueError(f"origin must be shape (4, 4), got {self.origin.shape}")
+        if (
+            self.limit_lower is not None
+            and self.limit_upper is not None
+            and self.limit_lower > self.limit_upper
+        ):
+            raise ValueError(
+                f"limit_lower ({self.limit_lower}) must be <= limit_upper ({self.limit_upper})"
+            )
