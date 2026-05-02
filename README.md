@@ -6,16 +6,7 @@ Status: v0.1.0a0 — CLI core (no GUI yet).
 
 ## Install
 
-`pythonOCC-core` is required for STEP support and is **not available on PyPI**. Two install paths:
-
-### Option A — conda (recommended, full STEP support)
-
-```bash
-conda env create -f environment.yml
-conda activate cad2urdf
-```
-
-### Option B — pip only (no STEP support)
+### Recommended (pip-only — STL/OBJ inputs)
 
 ```bash
 python3.10 -m venv .venv
@@ -23,7 +14,20 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-STL/OBJ inputs work in this mode; STEP-related features will raise `ImportError` at runtime.
+This is the default v1-alpha install path. STL and OBJ mesh inputs are fully
+supported. STEP support requires conda + pythonOCC-core (see below) — until
+that lands in v1.0, the CLI rejects `.step` / `.stp` inputs with a clear error.
+
+### v1.0+ — STEP support via conda (not yet wired)
+
+`pythonOCC-core` is not on PyPI; it's distributed via conda-forge. The
+`environment.yml` is provided as scaffolding for v1.0; the CLI doesn't yet
+consume STEP files. Track the GitHub issue tracker for STEP support landing.
+
+```bash
+conda env create -f environment.yml
+conda activate cad2urdf
+```
 
 ## Quick start
 

@@ -2,7 +2,34 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+ROS_PACKAGE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def _validate_package_name(name: str) -> None:
+    """Raise ValueError if *name* is not a valid ROS package name.
+
+    Valid names start with a lowercase letter, then contain only lowercase
+    alphanumeric characters or underscores (no hyphens, no uppercase, no
+    leading digits).
+    """
+    if not ROS_PACKAGE_NAME_RE.match(name):
+        raise ValueError(
+            f"invalid ROS package name {name!r}: must match "
+            f"{ROS_PACKAGE_NAME_RE.pattern} "
+            "(start with lowercase letter, then lowercase alphanumeric or underscore)"
+        )
+
+
+def _validate_urdf_relpath(p: Path) -> None:
+    """Raise ValueError if *p* is absolute or contains '..' path segments."""
+    if p.is_absolute():
+        raise ValueError(f"urdf_relpath must be relative, got absolute path {p}")
+    if ".." in p.parts:
+        raise ValueError(f"urdf_relpath must not contain '..' segments, got {p}")
+
 
 PACKAGE_XML = """\
 <?xml version="1.0"?>
@@ -90,7 +117,7 @@ Visualization Manager:
       Description Topic:
         Value: /robot_description
   Global Options:
-    Fixed Frame: base
+    Fixed Frame: {base_link_name}
 """
 
 
@@ -101,13 +128,27 @@ def scaffold_ros_package(
     urdf_relpath: Path,
     maintainer_name: str,
     maintainer_email: str,
+    base_link_name: str = "base",
 ) -> None:
     """Create a ROS 2 ament_cmake package skeleton at `out_dir`.
 
     Creates: package.xml, CMakeLists.txt, launch/display.launch.py, rviz/display.rviz,
     plus empty urdf/ and meshes/{visual,collision}/ directories the URDF emitter
     will populate.
+
+    Args:
+        out_dir: Destination directory (created if absent).
+        package_name: ROS package name — must satisfy ``[a-z][a-z0-9_]*``.
+        urdf_relpath: Path to the URDF inside the package (must be relative,
+            no ``..`` segments).
+        maintainer_name: Author name for package.xml.
+        maintainer_email: Author e-mail for package.xml.
+        base_link_name: Name of the fixed frame used in the RViz config
+            (default: ``"base"``).
     """
+    _validate_package_name(package_name)
+    _validate_urdf_relpath(urdf_relpath)
+
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "urdf").mkdir(exist_ok=True)
     (out_dir / "meshes" / "visual").mkdir(parents=True, exist_ok=True)
@@ -126,4 +167,6 @@ def scaffold_ros_package(
     (out_dir / "launch" / "display.launch.py").write_text(
         LAUNCH_PY.format(package_name=package_name, urdf_relpath=urdf_relpath.as_posix())
     )
-    (out_dir / "rviz" / "display.rviz").write_text(RVIZ_CONFIG)
+    (out_dir / "rviz" / "display.rviz").write_text(
+        RVIZ_CONFIG.format(base_link_name=base_link_name)
+    )
