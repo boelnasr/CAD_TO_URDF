@@ -29,9 +29,9 @@ def test_missing_manipulapy_returns_clear_error(tmp_path: Path) -> None:
     """When ManipulaPy is NOT installed, validate_urdf should return a failed report
     with a helpful error rather than raising ImportError."""
     try:
-        import manipulapy  # noqa: F401
+        import ManipulaPy  # noqa: F401
 
-        pytest.skip("manipulapy is installed; this test only verifies the not-installed path")
+        pytest.skip("ManipulaPy is installed; this test only verifies the not-installed path")
     except ImportError:
         pass
 
@@ -49,7 +49,7 @@ def test_minimal_valid_urdf_passes_when_manipulapy_installed(tmp_path: Path) -> 
 
     Skipped on default install path (no manipulapy in [dev] extras).
     """
-    pytest.importorskip("manipulapy")
+    pytest.importorskip("ManipulaPy")
     urdf = tmp_path / "min.urdf"
     urdf.write_text(_MINIMAL_URDF)
     report = validate_urdf(urdf)

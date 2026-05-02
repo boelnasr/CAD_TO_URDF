@@ -80,6 +80,15 @@ def test_save_creates_parent_dirs(tmp_path: Path) -> None:
     assert out.is_file()
 
 
+def test_v1_payload_loads_directly_without_migration(tmp_path: Path) -> None:
+    """Sanity: with no migrations registered, v1 payload round-trips with no transform."""
+    out = tmp_path / "p.cad2urdf"
+    save_project(_robot(), out)
+    # File was written with current SCHEMA_VERSION, so loading is identity.
+    loaded = load_project(out)
+    assert loaded.name == "r"
+
+
 def test_save_preserves_full_inertial_override(tmp_path: Path) -> None:
     out = tmp_path / "proj.cad2urdf"
     base = Link(

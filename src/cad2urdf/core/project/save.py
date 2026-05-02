@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,40 @@ from cad2urdf.core.kinematic.model import (
 )
 
 SCHEMA_VERSION = 1
+
+# Migration registry: maps (from_version, to_version) -> function that transforms payload dict.
+# When SCHEMA_VERSION is bumped to 2, add entry (1, 2): _migrate_v1_to_v2.
+_MIGRATIONS: dict[tuple[int, int], Callable[[dict[str, Any]], dict[str, Any]]] = {}
+
+
+def _migrate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Walk migrations from payload's schema_version up to SCHEMA_VERSION.
+
+    Returns a payload dict at SCHEMA_VERSION, or raises ValueError if no
+    migration path exists.
+    """
+    current = payload.get("schema_version")
+    if current == SCHEMA_VERSION:
+        return payload
+    if not isinstance(current, int):
+        raise ValueError(
+            f"unsupported schema_version: {current!r} (expected {SCHEMA_VERSION}). "
+            "schema_version must be an integer."
+        )
+
+    while current != SCHEMA_VERSION:
+        next_version = current + 1
+        migration = _MIGRATIONS.get((current, next_version))
+        if migration is None:
+            raise ValueError(
+                f"unsupported schema_version: {current} (expected {SCHEMA_VERSION}). "
+                f"No migration registered for {current} -> {next_version}. "
+                f"Add an entry to _MIGRATIONS in {__file__}."
+            )
+        payload = migration(payload)
+        current = next_version
+
+    return payload
 
 
 def _link_to_dict(link: Link) -> dict[str, Any]:
@@ -100,11 +135,7 @@ def load_project(path: Path) -> Robot:
     if not path.is_file():
         raise FileNotFoundError(f"project file not found: {path}")
     payload = json.loads(path.read_text())
-    if payload.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError(
-            f"unsupported schema_version: {payload.get('schema_version')!r} "
-            f"(expected {SCHEMA_VERSION})"
-        )
+    payload = _migrate_payload(payload)
     return Robot(
         name=payload["name"],
         base_link=payload["base_link"],
