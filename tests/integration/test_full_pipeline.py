@@ -49,6 +49,12 @@ def test_full_pipeline_two_stl_cubes(tmp_path: Path, fixtures_dir: Path) -> None
     assert (out_pkg / "meshes" / "collision" / "cube_a.stl").is_file()
     assert (out_pkg / "meshes" / "collision" / "cube_b.stl").is_file()
 
+    urdf_text = (out_pkg / "urdf" / "two_cubes.urdf").read_text()
+    # Single-pass emit + pre-computed inertia means the final URDF has <inertial> blocks.
+    assert urdf_text.count("<inertial>") == 2  # one per link
+    assert "<mass value=" in urdf_text
+    assert "<inertia ixx=" in urdf_text
+
 
 def test_step_input_returns_clear_error(tmp_path: Path, fixtures_dir: Path) -> None:
     # Empty .step file — content doesn't matter, the CLI should reject by extension

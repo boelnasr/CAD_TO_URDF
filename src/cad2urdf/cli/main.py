@@ -18,6 +18,7 @@ from cad2urdf.core.config.loader import (
     load_joints_config,
     origin_from_xyz_rpy,
 )
+from cad2urdf.core.inertia.compute import compute_inertial
 from cad2urdf.core.inertia.materials import lookup
 from cad2urdf.core.kinematic.model import (
     InertialOverride,
@@ -143,19 +144,30 @@ def _build_joints(cfg: JointsConfig) -> dict[str, Joint]:
     return out
 
 
-def _with_absolute_visual(link: Link, abs_path: Path) -> Link:
-    """Return a copy of `link` with visual/collision paths swapped to absolute on-disk paths.
+def _populate_inertia(link: Link, abs_visual_path: Path) -> Link:
+    """Compute mass/COM/inertia from the on-disk STL and bake into a new InertialOverride.
 
-    Used during the inertia-computation pass so trimesh can load the meshes; replaced
-    with package:// URIs in the final URDF emit.
+    This lets the URDF emitter write the <inertial> block via the override-only path
+    (which doesn't need absolute mesh paths in the Link), so we can do a single emit pass.
     """
+    import trimesh as _trimesh  # local import; trimesh already in core deps
+
+    mesh = _trimesh.load(str(abs_visual_path), file_type="stl", force="mesh")
+    if not isinstance(mesh, _trimesh.Trimesh):
+        # Couldn't load — keep the existing override (which may already be empty).
+        return link
+    mass, com, inertia = compute_inertial(
+        mesh,
+        density=link.material_density,
+        override=link.inertial_override,
+    )
     return Link(
         name=link.name,
-        visual_mesh_path=abs_path,
-        collision_mesh_path=abs_path,
+        visual_mesh_path=link.visual_mesh_path,
+        collision_mesh_path=link.collision_mesh_path,
         material_density=link.material_density,
         material_name=link.material_name,
-        inertial_override=link.inertial_override,
+        inertial_override=InertialOverride(mass=mass, com=com, inertia=inertia),
         origin=link.origin,
     )
 
@@ -209,19 +221,22 @@ def main(argv: list[str] | None = None) -> int:
     for i in issues:
         log.warning("validation issue: %s on %s — %s", i.kind, i.target, i.detail)
 
-    # Phase 4: emit URDF with absolute paths so inertia auto-computes.
-    abs_links = {n: _with_absolute_visual(rel_links[n], abs_paths[n]) for n in rel_links}
-    abs_robot = Robot(
+    # Phase 4: pre-compute inertia from on-disk STLs and bake into each link's
+    # InertialOverride. Single-pass emit: no more absolute-path round trip; the
+    # emitter takes the override-only path and writes a complete <inertial> block.
+    links_with_inertia: dict[str, Link] = {
+        n: _populate_inertia(rel_links[n], abs_paths[n]) for n in rel_links
+    }
+    robot_final = Robot(
         name=robot.name,
         base_link=robot.base_link,
-        links=abs_links,
+        links=links_with_inertia,
         joints=robot.joints,
     )
 
     urdf_path = args.out / "urdf" / f"{cfg.robot_name}.urdf"
-    emit_urdf(abs_robot, urdf_path, package_name=package_name)
 
-    # Phase 5: scaffold ROS package files.
+    # Phase 5: scaffold ROS package files (skeleton lands first so emit writes into it).
     scaffold_ros_package(
         out_dir=args.out,
         package_name=package_name,
@@ -230,12 +245,8 @@ def main(argv: list[str] | None = None) -> int:
         maintainer_email=args.maintainer_email,
     )
 
-    # Phase 6: re-emit URDF with package:// URIs (final, ROS-correct paths).
-    # NOTE: two-pass emit is a deliberate v1-alpha hack — first pass loads abs
-    # mesh paths so _emit_inertial can auto-compute mass+COM+inertia; second pass
-    # rewrites filenames as package:// URIs for ROS. v2 should split inertia
-    # computation out of the emitter.
-    emit_urdf(robot, urdf_path, package_name=package_name)
+    # Phase 6: emit URDF with package:// URIs (final, ROS-correct paths).
+    emit_urdf(robot_final, urdf_path, package_name=package_name)
 
     print(f"wrote {urdf_path}")
 
