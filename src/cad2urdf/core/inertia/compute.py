@@ -31,12 +31,27 @@ def compute_inertial(
             "mesh %s is non-watertight; falling back to convex hull for inertia",
             getattr(mesh, "metadata", {}).get("file_name", "<unnamed>"),
         )
-        mesh = mesh.convex_hull
+        try:
+            mesh = mesh.convex_hull
+        except Exception as e:  # QhullError or anything else
+            log.error(
+                "convex hull failed for non-watertight mesh: %s. Returning zero-mass fallback.",
+                e,
+            )
+            zero_com = np.zeros(3)
+            zero_inertia = np.zeros((3, 3))
+            ov = override
+            return (
+                ov.mass if ov.mass is not None else 0.0,
+                ov.com if ov.com is not None else zero_com,
+                ov.inertia if ov.inertia is not None else zero_inertia,
+            )
 
-    mesh.density = density
-    auto_mass = float(mesh.mass)
-    auto_com: NDArray[Any] = np.asarray(mesh.center_mass, dtype=float).reshape(3)
-    auto_inertia: NDArray[Any] = np.asarray(mesh.moment_inertia, dtype=float).reshape(3, 3)
+    mesh_copy = mesh.copy()
+    mesh_copy.density = density
+    auto_mass = float(mesh_copy.mass)
+    auto_com: NDArray[Any] = np.asarray(mesh_copy.center_mass, dtype=float).reshape(3)
+    auto_inertia: NDArray[Any] = np.asarray(mesh_copy.moment_inertia, dtype=float).reshape(3, 3)
 
     mass = override.mass if override.mass is not None else auto_mass
     com = override.com if override.com is not None else auto_com

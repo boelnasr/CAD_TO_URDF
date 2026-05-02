@@ -59,3 +59,42 @@ def test_non_watertight_falls_back_to_convex_hull(caplog) -> None:
 
     assert mass >= 0.0
     assert any("non-watertight" in rec.message for rec in caplog.records)
+
+
+def test_convex_hull_failure_returns_zero_fallback(caplog) -> None:
+    """Degenerate mesh (3 colinear points) causes QhullError; function must not raise."""
+    import logging
+    import unittest.mock as mock
+
+    # A single triangle (3 coplanar/colinear verts) — convex_hull will fail because
+    # scipy QHull cannot build a 3-D hull from coplanar/degenerate input.
+    verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
+    faces = np.array([[0, 1, 2]])
+    bad_mesh = trimesh.Trimesh(vertices=verts, faces=faces)
+    assert not bad_mesh.is_watertight
+
+    # Force convex_hull to raise regardless of trimesh version behaviour.
+    with (
+        mock.patch.object(
+            type(bad_mesh),
+            "convex_hull",
+            new_callable=lambda: property(
+                lambda self: (_ for _ in ()).throw(Exception("QhullError: degenerate"))
+            ),
+        ),
+        caplog.at_level(logging.ERROR),
+    ):
+        mass, com, inertia = compute_inertial(bad_mesh, density=1000.0, override=InertialOverride())
+
+    assert mass == 0.0
+    assert np.array_equal(com, np.zeros(3))
+    assert np.array_equal(inertia, np.zeros((3, 3)))
+    assert any("convex hull failed" in rec.message for rec in caplog.records)
+
+
+def test_compute_does_not_mutate_input_mesh_density() -> None:
+    """compute_inertial must not alter the caller's mesh.density."""
+    cube = trimesh.creation.box(extents=(1.0, 1.0, 1.0))
+    cube.density = 1000.0
+    compute_inertial(cube, density=2700.0, override=InertialOverride())
+    assert cube.density == 1000.0

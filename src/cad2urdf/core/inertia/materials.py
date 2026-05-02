@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
+from types import MappingProxyType
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_TABLE_PATH = PROJECT_ROOT / "config" / "materials.json"
@@ -20,9 +22,9 @@ class Material:
     color_rgba: tuple[float, float, float, float]
 
 
-@lru_cache(maxsize=1)
-def load_material_table(path: Path | None = None) -> dict[str, Material]:
-    """Load the material table from JSON. Cached by path for the lifetime of the process."""
+@cache
+def _load_material_table_inner(path: Path | None = None) -> dict[str, Material]:
+    """Internal cached loader. Returns the underlying mutable dict."""
     p = path or DEFAULT_TABLE_PATH
     if not p.is_file():
         raise FileNotFoundError(f"materials table not found: {p}")
@@ -38,6 +40,12 @@ def load_material_table(path: Path | None = None) -> dict[str, Material]:
             color_rgba=(float(rgba[0]), float(rgba[1]), float(rgba[2]), float(rgba[3])),
         )
     return out
+
+
+def load_material_table(path: Path | None = None) -> Mapping[str, Material]:
+    """Load the material table from JSON. Returns a read-only mapping.
+    Cached per path for the lifetime of the process."""
+    return MappingProxyType(_load_material_table_inner(path))
 
 
 def lookup(name: str) -> Material:
