@@ -46,8 +46,8 @@ def add_link(robot: Robot, link: Link, joint: Joint) -> Robot:
         raise ValueError(f"joint.child {joint.child!r} != link.name {link.name!r}")
 
     new = deepcopy(robot)
-    new.links[link.name] = link
-    new.joints[joint.name] = joint
+    new.links[link.name] = deepcopy(link)
+    new.joints[joint.name] = deepcopy(joint)
     return new
 
 
@@ -65,7 +65,14 @@ def remove_link(robot: Robot, link_name: str) -> Robot:
     new.joints = {
         jn: j for jn, j in new.joints.items() if j.parent not in doomed and j.child not in doomed
     }
-    return new
+    # Re-construct to trigger __post_init__ validation (e.g., if pruning somehow
+    # orphaned the base_link in a malformed cyclic graph).
+    return Robot(
+        name=new.name,
+        base_link=new.base_link,
+        links=new.links,
+        joints=new.joints,
+    )
 
 
 def reparent_joint(robot: Robot, joint_name: str, new_parent: str) -> Robot:

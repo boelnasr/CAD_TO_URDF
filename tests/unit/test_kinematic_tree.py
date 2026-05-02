@@ -141,3 +141,19 @@ def test_reparent_joint_rejects_unknown_new_parent() -> None:
     r = _three_link_robot()
     with pytest.raises(ValueError, match=r"new parent 'ghost' not in robot"):
         reparent_joint(r, "bc", new_parent="ghost")
+
+
+def test_add_link_does_not_share_references() -> None:
+    """add_link must deepcopy the caller's link/joint so external mutation doesn't leak in."""
+    r = _three_link_robot()
+    new_link = _mk_link("d")
+    j = _mk_joint("cd", "c", "d")
+    r2 = add_link(r, new_link, j)
+
+    # Mutate the original link's origin in place
+    new_link.origin[0, 3] = 999.0
+
+    # The stored copy inside r2 must be unaffected
+    assert r2.links["d"].origin[0, 3] == 0.0, (
+        "add_link stored a reference instead of a copy; external mutation leaked in"
+    )

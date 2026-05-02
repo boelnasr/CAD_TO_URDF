@@ -111,8 +111,16 @@ class Robot:
             raise ValueError("name must not be empty")
         if self.base_link not in self.links:
             raise ValueError(f"base_link {self.base_link!r} not in links")
-        for jn, j in self.joints.items():
-            if j.parent not in self.links or j.child not in self.links:
+        for key, link in self.links.items():
+            if link.name != key:
+                raise ValueError(f"links dict key {key!r} does not match Link.name {link.name!r}")
+        for key, joint in self.joints.items():
+            if joint.name != key:
                 raise ValueError(
-                    f"joint {jn!r} references unknown link (parent={j.parent!r}, child={j.child!r})"
+                    f"joints dict key {key!r} does not match Joint.name {joint.name!r}"
+                )
+            if joint.parent not in self.links or joint.child not in self.links:
+                raise ValueError(
+                    f"joint {key!r} references unknown link "
+                    f"(parent={joint.parent!r}, child={joint.child!r})"
                 )

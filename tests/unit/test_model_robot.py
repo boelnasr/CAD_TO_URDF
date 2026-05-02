@@ -74,3 +74,27 @@ def test_robot_rejects_empty_name() -> None:
             links={"base": _link("base")},
             joints={},
         )
+
+
+def test_robot_rejects_dict_key_mismatched_with_link_name() -> None:
+    """Dict key 'a' with Link.name 'b' must raise ValueError."""
+    with pytest.raises(ValueError, match=r"links dict key 'a' does not match Link\.name 'b'"):
+        Robot(
+            name="bad",
+            base_link="a",
+            links={"a": _link("b")},
+            joints={},
+        )
+
+
+def test_robot_rejects_dict_key_mismatched_with_joint_name() -> None:
+    """Dict key 'j_wrong' with Joint.name 'j1' must raise ValueError."""
+    with pytest.raises(
+        ValueError, match=r"joints dict key 'j_wrong' does not match Joint\.name 'j1'"
+    ):
+        Robot(
+            name="bad",
+            base_link="base",
+            links={"base": _link("base"), "tip": _link("tip")},
+            joints={"j_wrong": _fixed_joint("j1", "base", "tip")},
+        )
