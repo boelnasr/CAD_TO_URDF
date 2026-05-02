@@ -1,6 +1,6 @@
 # cad2urdf
 
-Convert CAD assemblies (STEP / STL / OBJ) into ROS 2-ready URDF packages.
+Convert CAD assemblies (STL / OBJ; STEP support coming in v1.0) into ROS 2-ready URDF packages.
 
 Status: v0.1.0a0 — CLI core (no GUI yet).
 
@@ -34,5 +34,5 @@ conda activate cad2urdf
 > Note: forward-looking — implementation lands in Phase 8 of v0.1.0a0. The command below shows the target API.
 
 ```bash
-cad2urdf input.step --joints joints.yaml -o my_robot/
+cad2urdf base.stl arm.stl --joints joints.yaml -o my_robot/
 ```

@@ -152,3 +152,81 @@ def test_rviz_config_uses_base_link_name(tmp_path: Path) -> None:
     )
     rviz = (out / "rviz" / "display.rviz").read_text()
     assert "Fixed Frame: cube_a" in rviz
+
+
+# ---------------------------------------------------------------------------
+# New security / validation tests (Codex post-fix findings)
+# ---------------------------------------------------------------------------
+
+
+def test_scaffold_rejects_package_name_with_trailing_newline(tmp_path: Path) -> None:
+    """Package name with a trailing newline must be rejected (fullmatch guard)."""
+    with pytest.raises(ValueError, match="invalid ROS package name"):
+        scaffold_ros_package(
+            out_dir=tmp_path / "out",
+            package_name="pkg\n",
+            urdf_relpath=Path("urdf/r.urdf"),
+            maintainer_name="m",
+            maintainer_email="m@e.com",
+        )
+
+
+def test_scaffold_rejects_urdf_relpath_with_unsafe_chars(tmp_path: Path) -> None:
+    """A urdf_relpath component with whitespace must raise ValueError."""
+    with pytest.raises(ValueError, match="unsafe characters"):
+        scaffold_ros_package(
+            out_dir=tmp_path / "out",
+            package_name="mypkg",
+            urdf_relpath=Path("urdf/foo bar.urdf"),
+            maintainer_name="m",
+            maintainer_email="m@e.com",
+        )
+
+
+def test_scaffold_rejects_urdf_relpath_with_special_chars(tmp_path: Path) -> None:
+    """A urdf_relpath component with a semicolon must raise ValueError."""
+    with pytest.raises(ValueError, match="unsafe characters"):
+        scaffold_ros_package(
+            out_dir=tmp_path / "out",
+            package_name="mypkg",
+            urdf_relpath=Path("urdf/foo;bar.urdf"),
+            maintainer_name="m",
+            maintainer_email="m@e.com",
+        )
+
+
+def test_scaffold_xml_escapes_maintainer_name(tmp_path: Path) -> None:
+    """maintainer_name containing XML special chars must be escaped in package.xml."""
+    out = tmp_path / "pkg"
+    scaffold_ros_package(
+        out_dir=out,
+        package_name="mypkg",
+        urdf_relpath=Path("urdf/r.urdf"),
+        maintainer_name="me & my <co>",
+        maintainer_email="m@e.com",
+    )
+    xml = (out / "package.xml").read_text()
+    assert "me &amp; my &lt;co&gt;" in xml
+    assert "me & my <co>" not in xml
+
+
+def test_scaffold_xml_escapes_maintainer_email_attr(tmp_path: Path) -> None:
+    """maintainer_email with a double-quote must be properly quoted in package.xml.
+
+    quoteattr() switches to single-quote delimiters when the value contains a
+    literal double-quote, producing  email='evil"injection'  which is valid XML.
+    The raw unquoted form  email="evil"injection"  must NOT appear.
+    """
+    out = tmp_path / "pkg"
+    scaffold_ros_package(
+        out_dir=out,
+        package_name="mypkg",
+        urdf_relpath=Path("urdf/r.urdf"),
+        maintainer_name="m",
+        maintainer_email='evil"injection',
+    )
+    xml = (out / "package.xml").read_text()
+    # quoteattr wraps in single-quotes when the value contains "
+    assert "email='evil\"injection'" in xml
+    # The broken double-quoted form must not appear
+    assert 'email="evil"injection"' not in xml
