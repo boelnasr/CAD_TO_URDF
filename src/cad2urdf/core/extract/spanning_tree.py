@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections import deque
 
+import numpy as np
+
 from cad2urdf.core.extract.mate_classify import ClassifiedJoint
 
 
@@ -51,14 +53,18 @@ def build_spanning_tree(
             seen.add(neighbor)
             queue.append(neighbor)
             if was_reversed:
-                # flip parent/child to make BFS root the parent
+                # flip parent/child to make BFS root the parent. The relative_pose
+                # describes child-relative-to-parent, so inverting it gives the new
+                # (flipped) child-relative-to-parent. The axis direction is also negated
+                # since the joint's positive direction reverses.
+                inverse_pose = np.linalg.inv(original.relative_pose)
                 out.append(
                     ClassifiedJoint(
                         parent_id=cur,
                         child_id=neighbor,
                         joint_type=original.joint_type,
-                        axis=original.axis,
-                        relative_pose=original.relative_pose,
+                        axis=-original.axis,
+                        relative_pose=inverse_pose,
                     )
                 )
             else:
