@@ -73,6 +73,10 @@ def _emit_inertial(parent: ET.Element, link: Link) -> None:
 def _mesh_uri(package_name: str, rel: Path) -> str:
     if rel.is_absolute():
         raise ValueError(f"mesh path must be relative for package:// URI; got absolute path {rel}")
+    if ".." in rel.parts:
+        raise ValueError(
+            f"mesh path must not contain '..' segments (would escape package); got {rel}"
+        )
     return f"package://{package_name}/{rel.as_posix()}"
 
 

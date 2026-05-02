@@ -287,3 +287,46 @@ def test_emit_urdf_clamps_pitch_for_numerical_drift(tmp_path: Path) -> None:
     rpy_str = origin_el.attrib["rpy"]
     rpy_vals = [float(v) for v in rpy_str.split()]
     assert all(np.isfinite(rpy_vals)), f"Non-finite RPY values after clamp: {rpy_vals}"
+
+
+def test_emit_urdf_rejects_mesh_path_with_dotdot(tmp_path: Path) -> None:
+    """P2: mesh path with '..' segments must raise ValueError to prevent package traversal."""
+    base = Link(
+        name="base",
+        visual_mesh_path=Path("../escape/evil.stl"),  # traversal path — forbidden
+        collision_mesh_path=Path("meshes/collision/base.stl"),
+        material_density=2700.0,
+        material_name="aluminum_6061",
+        inertial_override=InertialOverride(),
+        origin=np.eye(4),
+    )
+    tip = Link(
+        name="tip",
+        visual_mesh_path=Path("meshes/visual/tip.stl"),
+        collision_mesh_path=Path("meshes/collision/tip.stl"),
+        material_density=2700.0,
+        material_name="aluminum_6061",
+        inertial_override=InertialOverride(),
+        origin=np.eye(4),
+    )
+    j = Joint(
+        name="j1",
+        type="revolute",
+        parent="base",
+        child="tip",
+        axis=np.array([0.0, 0.0, 1.0]),
+        origin=np.eye(4),
+        limit_lower=-3.14,
+        limit_upper=3.14,
+        effort=10.0,
+        velocity=2.0,
+    )
+    robot = Robot(
+        name="traversal_arm",
+        base_link="base",
+        links={"base": base, "tip": tip},
+        joints={"j1": j},
+    )
+    out = tmp_path / "robot.urdf"
+    with pytest.raises(ValueError, match=r"must not contain '\.\.' segments"):
+        emit_urdf(robot, out, package_name="p")
