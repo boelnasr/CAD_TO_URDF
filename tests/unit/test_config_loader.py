@@ -138,3 +138,69 @@ def test_load_empty_joints_list_is_valid(tmp_path: Path) -> None:
     cfg = load_joints_config(p)
     assert cfg.joints == []
     assert cfg.robot_name == "my_robot"
+
+
+def test_load_axis_with_nan_raises(tmp_path: Path) -> None:
+    p = tmp_path / "x.yaml"
+    p.write_text("""
+robot_name: r
+base_link: a
+joints:
+  - name: j1
+    type: fixed
+    parent: a
+    child: b
+    axis: [.nan, 0, 0]
+""")
+    with pytest.raises(ValueError, match="must be finite"):
+        load_joints_config(p)
+
+
+def test_load_axis_with_inf_raises(tmp_path: Path) -> None:
+    p = tmp_path / "x.yaml"
+    p.write_text("""
+robot_name: r
+base_link: a
+joints:
+  - name: j1
+    type: fixed
+    parent: a
+    child: b
+    axis: [.inf, 0, 0]
+""")
+    with pytest.raises(ValueError, match="must be finite"):
+        load_joints_config(p)
+
+
+def test_load_origin_xyz_with_nan_raises(tmp_path: Path) -> None:
+    p = tmp_path / "x.yaml"
+    p.write_text("""
+robot_name: r
+base_link: a
+joints:
+  - name: j1
+    type: fixed
+    parent: a
+    child: b
+    origin:
+      xyz: [.nan, 0, 0]
+""")
+    with pytest.raises(ValueError, match="must be finite"):
+        load_joints_config(p)
+
+
+def test_load_limit_lower_with_inf_raises(tmp_path: Path) -> None:
+    p = tmp_path / "x.yaml"
+    p.write_text("""
+robot_name: r
+base_link: a
+joints:
+  - name: j1
+    type: revolute
+    parent: a
+    child: b
+    limits:
+      lower: .inf
+""")
+    with pytest.raises(ValueError, match="must be finite"):
+        load_joints_config(p)

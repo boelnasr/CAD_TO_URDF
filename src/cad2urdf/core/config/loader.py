@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -52,18 +53,26 @@ def _validate_axis(val: Any, ctx: str) -> list[float]:
     if not isinstance(val, list) or len(val) != 3:
         raise ValueError(f"{ctx}: 'axis' must be a 3-element list, got {val!r}")
     try:
-        return [float(x) for x in val]
+        result = [float(x) for x in val]
     except (TypeError, ValueError) as e:
         raise ValueError(f"{ctx}: 'axis' elements must be numeric: {e}") from e
+    for i, v in enumerate(result):
+        if not math.isfinite(v):
+            raise ValueError(f"{ctx}: 'axis[{i}]' must be finite, got {v}")
+    return result
 
 
 def _validate_xyz_or_rpy(val: Any, field_name: str, ctx: str) -> list[float]:
     if not isinstance(val, list) or len(val) != 3:
         raise ValueError(f"{ctx}: 'origin.{field_name}' must be a 3-element list, got {val!r}")
     try:
-        return [float(x) for x in val]
+        result = [float(x) for x in val]
     except (TypeError, ValueError) as e:
         raise ValueError(f"{ctx}: 'origin.{field_name}' elements must be numeric: {e}") from e
+    for i, v in enumerate(result):
+        if not math.isfinite(v):
+            raise ValueError(f"{ctx}: 'origin.{field_name}[{i}]' must be finite, got {v}")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +83,15 @@ def _validate_xyz_or_rpy(val: Any, field_name: str, ctx: str) -> list[float]:
 def _get_limit(j: dict[str, Any], field_name: str) -> float | None:
     lim = j.get("limits", {})
     val = lim.get(field_name)
-    return float(val) if val is not None else None
+    if val is None:
+        return None
+    try:
+        result = float(val)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"limits.{field_name!r} must be numeric: {e}") from e
+    if not math.isfinite(result):
+        raise ValueError(f"limits.{field_name!r} must be finite, got {result}")
+    return result
 
 
 def load_joints_config(path: Path) -> JointsConfig:
