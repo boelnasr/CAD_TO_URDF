@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sys
 from pathlib import Path
 
@@ -179,7 +180,12 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    cfg = load_joints_config(args.joints)
+    try:
+        cfg = load_joints_config(args.joints)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
     if args.robot_name:
         cfg = JointsConfig(
             robot_name=args.robot_name,
@@ -189,78 +195,109 @@ def main(argv: list[str] | None = None) -> int:
         )
     package_name = args.package_name or args.out.name
 
-    args.out.mkdir(parents=True, exist_ok=True)
+    # ------------------------------------------------------------------
+    # Rollback guard: track whether WE created the output directory.
+    # If any step after the first disk write fails, remove what we wrote.
+    # NOTE (Track B coordination): scaffold_ros_package call below already
+    # includes base_link_name=cfg.base_link — do not duplicate that arg here.
+    # ------------------------------------------------------------------
+    out_dir_existed_before = args.out.exists()
+    write_started = False
 
-    # Phase 1: load each mesh, write into the package, build Link records (relative paths).
-    rel_links: dict[str, Link] = {}
-    abs_paths: dict[str, Path] = {}
-    for inp in args.inputs:
+    def _cleanup_on_error() -> None:
+        """Remove partially-written output directory if WE created it."""
+        if write_started and not out_dir_existed_before and args.out.exists():
+            try:
+                shutil.rmtree(args.out)
+                log.info("rolled back partial write to %s", args.out)
+            except Exception as exc:
+                log.warning("cleanup failed: %s", exc)
+
+    try:
+        args.out.mkdir(parents=True, exist_ok=True)
+        write_started = True
+
+        # Phase 1: load each mesh, write into the package, build Link records (relative paths).
+        rel_links: dict[str, Link] = {}
+        abs_paths: dict[str, Path] = {}
+        for inp in args.inputs:
+            try:
+                link, abs_visual = _load_mesh_to_link(inp, args.out, cfg)
+            except ValueError as e:
+                print(f"error: {e}", file=sys.stderr)
+                _cleanup_on_error()
+                return 2
+            rel_links[link.name] = link
+            abs_paths[link.name] = abs_visual
+
+        # Phase 2: build joints + Robot AST.
         try:
-            link, abs_visual = _load_mesh_to_link(inp, args.out, cfg)
+            joints = _build_joints(cfg)
+            robot = Robot(
+                name=cfg.robot_name,
+                base_link=cfg.base_link,
+                links=rel_links,
+                joints=joints,
+            )
         except ValueError as e:
             print(f"error: {e}", file=sys.stderr)
+            _cleanup_on_error()
             return 2
-        rel_links[link.name] = link
-        abs_paths[link.name] = abs_visual
 
-    # Phase 2: build joints + Robot AST.
-    try:
-        joints = _build_joints(cfg)
-        robot = Robot(
-            name=cfg.robot_name,
-            base_link=cfg.base_link,
-            links=rel_links,
-            joints=joints,
+        # Phase 3: structural validation (issues are warnings, not blockers).
+        issues = validate_robot(robot)
+        for i in issues:
+            log.warning("validation issue: %s on %s — %s", i.kind, i.target, i.detail)
+
+        # Phase 4: pre-compute inertia from on-disk STLs and bake into each link's
+        # InertialOverride. Single-pass emit: no more absolute-path round trip; the
+        # emitter takes the override-only path and writes a complete <inertial> block.
+        links_with_inertia: dict[str, Link] = {
+            n: _populate_inertia(rel_links[n], abs_paths[n]) for n in rel_links
+        }
+        robot_final = Robot(
+            name=robot.name,
+            base_link=robot.base_link,
+            links=links_with_inertia,
+            joints=robot.joints,
         )
-    except ValueError as e:
+
+        urdf_path = args.out / "urdf" / f"{cfg.robot_name}.urdf"
+
+        # Phase 5: scaffold ROS package files (skeleton lands first so emit writes into it).
+        scaffold_ros_package(
+            out_dir=args.out,
+            package_name=package_name,
+            urdf_relpath=Path("urdf") / f"{cfg.robot_name}.urdf",
+            maintainer_name=args.maintainer,
+            maintainer_email=args.maintainer_email,
+            base_link_name=cfg.base_link,
+        )
+
+        # Phase 6: emit URDF with package:// URIs (final, ROS-correct paths).
+        emit_urdf(robot_final, urdf_path, package_name=package_name)
+
+        print(f"wrote {urdf_path}")
+
+        # Phase 7: optional ManipulaPy validation.
+        if not args.no_validate:
+            report = validate_urdf(urdf_path)
+            if report.ok:
+                print(f"ManipulaPy-compatible: {urdf_path}")
+            else:
+                print(
+                    f"warning: ManipulaPy validation failed: {report.error}",
+                    file=sys.stderr,
+                )
+                # don't exit nonzero — validation is informative, not blocking
+
+    except Exception as e:
+        # Safety net: catches unexpected failures (OSError on disk write, etc.)
+        # that the per-phase except-ValueError blocks above do not cover.
+        _cleanup_on_error()
         print(f"error: {e}", file=sys.stderr)
         return 2
 
-    # Phase 3: structural validation (issues are warnings, not blockers).
-    issues = validate_robot(robot)
-    for i in issues:
-        log.warning("validation issue: %s on %s — %s", i.kind, i.target, i.detail)
-
-    # Phase 4: pre-compute inertia from on-disk STLs and bake into each link's
-    # InertialOverride. Single-pass emit: no more absolute-path round trip; the
-    # emitter takes the override-only path and writes a complete <inertial> block.
-    links_with_inertia: dict[str, Link] = {
-        n: _populate_inertia(rel_links[n], abs_paths[n]) for n in rel_links
-    }
-    robot_final = Robot(
-        name=robot.name,
-        base_link=robot.base_link,
-        links=links_with_inertia,
-        joints=robot.joints,
-    )
-
-    urdf_path = args.out / "urdf" / f"{cfg.robot_name}.urdf"
-
-    # Phase 5: scaffold ROS package files (skeleton lands first so emit writes into it).
-    scaffold_ros_package(
-        out_dir=args.out,
-        package_name=package_name,
-        urdf_relpath=Path("urdf") / f"{cfg.robot_name}.urdf",
-        maintainer_name=args.maintainer,
-        maintainer_email=args.maintainer_email,
-    )
-
-    # Phase 6: emit URDF with package:// URIs (final, ROS-correct paths).
-    emit_urdf(robot_final, urdf_path, package_name=package_name)
-
-    print(f"wrote {urdf_path}")
-
-    # Phase 7: optional ManipulaPy validation.
-    if not args.no_validate:
-        report = validate_urdf(urdf_path)
-        if report.ok:
-            print(f"ManipulaPy-compatible: {urdf_path}")
-        else:
-            print(
-                f"warning: ManipulaPy validation failed: {report.error}",
-                file=sys.stderr,
-            )
-            # don't exit nonzero — validation is informative, not blocking
     return 0
 
 

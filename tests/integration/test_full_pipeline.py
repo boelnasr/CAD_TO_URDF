@@ -56,6 +56,23 @@ def test_full_pipeline_two_stl_cubes(tmp_path: Path, fixtures_dir: Path) -> None
     assert "<inertia ixx=" in urdf_text
 
 
+def test_partial_write_rolled_back_on_invalid_joints_yaml(tmp_path: Path) -> None:
+    """If yaml is invalid AFTER mesh writes start, the partial output is cleaned up."""
+    stl_dir = tmp_path / "inputs"
+    stl_dir.mkdir()
+    cube = stl_dir / "cube.stl"
+    _write_cube_stl(cube)
+
+    bad_yaml = tmp_path / "bad.yaml"
+    bad_yaml.write_text("not_a_mapping_just_a_string\n")
+
+    out_pkg = tmp_path / "rollback_test_pkg"
+    rc = main([str(cube), "--joints", str(bad_yaml), "-o", str(out_pkg), "--no-validate"])
+    assert rc == 2
+    # Output directory should NOT exist (rolled back since we created it).
+    assert not out_pkg.exists(), f"expected rollback but {out_pkg} still exists"
+
+
 def test_step_input_returns_clear_error(tmp_path: Path, fixtures_dir: Path) -> None:
     # Empty .step file — content doesn't matter, the CLI should reject by extension
     fake_step = tmp_path / "anything.step"
