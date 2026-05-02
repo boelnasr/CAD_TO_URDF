@@ -11,6 +11,7 @@ import trimesh
 from numpy.typing import NDArray
 
 from cad2urdf.core.inertia.compute import compute_inertial
+from cad2urdf.core.inertia.materials import lookup
 from cad2urdf.core.kinematic.model import Joint, Link, Robot
 
 
@@ -22,7 +23,7 @@ def _origin_xyz_rpy(m: NDArray[Any]) -> tuple[str, str]:
     """Decompose a 4x4 homogeneous transform into URDF xyz + roll-pitch-yaw strings."""
     xyz = m[:3, 3]
     rot = m[:3, :3]
-    pitch = float(np.arcsin(-rot[2, 0]))
+    pitch = float(np.arcsin(np.clip(-rot[2, 0], -1.0, 1.0)))
     if abs(np.cos(pitch)) > 1e-6:
         roll = float(np.arctan2(rot[2, 1], rot[2, 2]))
         yaw = float(np.arctan2(rot[1, 0], rot[0, 0]))
@@ -70,6 +71,8 @@ def _emit_inertial(parent: ET.Element, link: Link) -> None:
 
 
 def _mesh_uri(package_name: str, rel: Path) -> str:
+    if rel.is_absolute():
+        raise ValueError(f"mesh path must be relative for package:// URI; got absolute path {rel}")
     return f"package://{package_name}/{rel.as_posix()}"
 
 
@@ -103,17 +106,24 @@ def _emit_joint(parent: ET.Element, joint: Joint) -> None:
     ET.SubElement(el, "origin", attrib={"xyz": xyz, "rpy": rpy})
     ET.SubElement(el, "parent", attrib={"link": joint.parent})
     ET.SubElement(el, "child", attrib={"link": joint.child})
-    if joint.type != "fixed":
+    if joint.type in {"revolute", "prismatic", "continuous", "planar"}:
         ET.SubElement(el, "axis", attrib={"xyz": _format_xyz(joint.axis)})
     if joint.type in {"revolute", "prismatic"}:
+        if any(
+            v is None for v in (joint.limit_lower, joint.limit_upper, joint.effort, joint.velocity)
+        ):
+            raise ValueError(
+                f"joint {joint.name!r}: revolute/prismatic joints require"
+                " limit_lower, limit_upper, effort, velocity (got None)"
+            )
         ET.SubElement(
             el,
             "limit",
             attrib={
-                "lower": f"{joint.limit_lower if joint.limit_lower is not None else 0:g}",
-                "upper": f"{joint.limit_upper if joint.limit_upper is not None else 0:g}",
-                "effort": f"{joint.effort if joint.effort is not None else 0:g}",
-                "velocity": f"{joint.velocity if joint.velocity is not None else 0:g}",
+                "lower": f"{joint.limit_lower:g}",
+                "upper": f"{joint.limit_upper:g}",
+                "effort": f"{joint.effort:g}",
+                "velocity": f"{joint.velocity:g}",
             },
         )
 
@@ -129,7 +139,13 @@ def emit_urdf(robot: Robot, out_path: Path, *, package_name: str) -> None:
         if link.material_name in seen:
             continue
         seen.add(link.material_name)
-        ET.SubElement(root, "material", attrib={"name": link.material_name})
+        try:
+            mat = lookup(link.material_name)
+            color_str = " ".join(f"{c:g}" for c in mat.color_rgba)
+            mat_el = ET.SubElement(root, "material", attrib={"name": link.material_name})
+            ET.SubElement(mat_el, "color", attrib={"rgba": color_str})
+        except KeyError:
+            ET.SubElement(root, "material", attrib={"name": link.material_name})
 
     for name in sorted(robot.links):
         _emit_link(root, robot.links[name], package_name)
