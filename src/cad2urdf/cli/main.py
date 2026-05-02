@@ -1,0 +1,257 @@
+"""cad2urdf CLI: input meshes + joint config → ROS 2 URDF package.
+
+v1-alpha: STL/OBJ inputs only. STEP support requires conda + pythonOCC-core
+(see README's Option A install path).
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+from pathlib import Path
+
+import numpy as np
+
+from cad2urdf.core.config.loader import (
+    JointsConfig,
+    load_joints_config,
+    origin_from_xyz_rpy,
+)
+from cad2urdf.core.inertia.materials import lookup
+from cad2urdf.core.kinematic.model import (
+    InertialOverride,
+    Joint,
+    Link,
+    Robot,
+)
+from cad2urdf.core.kinematic.validate import validate_robot
+from cad2urdf.core.parsers.obj import load_obj
+from cad2urdf.core.parsers.stl import load_stl
+from cad2urdf.core.urdf.emit import emit_urdf
+from cad2urdf.core.urdf.package import scaffold_ros_package
+from cad2urdf.core.validation.manipulapy_gate import validate_urdf
+
+log = logging.getLogger("cad2urdf")
+
+STEP_NOT_SUPPORTED_MSG = (
+    "STEP / IGES inputs require pythonOCC-core (conda-only). "
+    "Install via `conda env create -f environment.yml` and rerun. "
+    "v1-alpha pip-install path supports STL/OBJ only."
+)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="cad2urdf", description="Convert CAD assemblies to ROS 2 URDF packages."
+    )
+    p.add_argument("inputs", nargs="+", type=Path, help="Input STL/OBJ files (one per link).")
+    p.add_argument("-o", "--out", type=Path, required=True, help="Output package directory.")
+    p.add_argument("--joints", type=Path, required=True, help="Joints YAML config.")
+    p.add_argument(
+        "--robot-name",
+        type=str,
+        help="Override robot name (default: from joints config).",
+    )
+    p.add_argument(
+        "--package-name",
+        type=str,
+        help="ROS package name (default: <out_dir>.name).",
+    )
+    p.add_argument(
+        "--maintainer",
+        type=str,
+        default="cad2urdf-user",
+        help="Maintainer name for package.xml.",
+    )
+    p.add_argument(
+        "--maintainer-email",
+        type=str,
+        default="user@example.com",
+        help="Maintainer email for package.xml.",
+    )
+    p.add_argument(
+        "--no-validate",
+        action="store_true",
+        help="Skip ManipulaPy post-emit validation (useful when manipulapy not installed).",
+    )
+    p.add_argument("-v", "--verbose", action="count", default=0, help="-v info, -vv debug.")
+    return p
+
+
+def _load_mesh_to_link(
+    inp: Path,
+    out_dir: Path,
+    cfg: JointsConfig,
+) -> tuple[Link, Path]:
+    """Load one mesh input, copy/export it into the package, return Link + abs visual path."""
+    visual_dir = out_dir / "meshes" / "visual"
+    collision_dir = out_dir / "meshes" / "collision"
+    visual_dir.mkdir(parents=True, exist_ok=True)
+    collision_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = inp.suffix.lower()
+    if suffix in {".step", ".stp"}:
+        raise ValueError(STEP_NOT_SUPPORTED_MSG)
+
+    name = inp.stem
+    if suffix == ".stl":
+        mesh = load_stl(inp)
+    elif suffix == ".obj":
+        mesh = load_obj(inp)
+    else:
+        raise ValueError(f"unsupported input format: {inp.suffix!r} (use .stl / .obj)")
+
+    # Always export to STL inside the package (URDF mesh references prefer STL).
+    visual_stl = visual_dir / f"{name}.stl"
+    mesh.export(str(visual_stl), file_type="stl")
+    (collision_dir / f"{name}.stl").write_bytes(visual_stl.read_bytes())
+
+    material_name = cfg.materials.get(name, "aluminum_6061")
+    mat = lookup(material_name)
+    link = Link(
+        name=name,
+        visual_mesh_path=Path("meshes/visual") / f"{name}.stl",
+        collision_mesh_path=Path("meshes/collision") / f"{name}.stl",
+        material_density=mat.density_kg_m3,
+        material_name=material_name,
+        inertial_override=InertialOverride(),
+        origin=np.eye(4),
+    )
+    return link, visual_stl
+
+
+def _build_joints(cfg: JointsConfig) -> dict[str, Joint]:
+    out: dict[str, Joint] = {}
+    for js in cfg.joints:
+        axis = np.asarray(js.axis, dtype=float)
+        norm = float(np.linalg.norm(axis))
+        if norm == 0.0:
+            raise ValueError(f"joint {js.name!r}: axis cannot be the zero vector")
+        out[js.name] = Joint(
+            name=js.name,
+            type=js.type,  # type: ignore[arg-type]
+            parent=js.parent,
+            child=js.child,
+            axis=axis / norm,
+            origin=origin_from_xyz_rpy(js.origin_xyz, js.origin_rpy),
+            limit_lower=js.limit_lower,
+            limit_upper=js.limit_upper,
+            effort=js.effort,
+            velocity=js.velocity,
+        )
+    return out
+
+
+def _with_absolute_visual(link: Link, abs_path: Path) -> Link:
+    """Return a copy of `link` with visual/collision paths swapped to absolute on-disk paths.
+
+    Used during the inertia-computation pass so trimesh can load the meshes; replaced
+    with package:// URIs in the final URDF emit.
+    """
+    return Link(
+        name=link.name,
+        visual_mesh_path=abs_path,
+        collision_mesh_path=abs_path,
+        material_density=link.material_density,
+        material_name=link.material_name,
+        inertial_override=link.inertial_override,
+        origin=link.origin,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    logging.basicConfig(
+        level=[logging.WARNING, logging.INFO, logging.DEBUG][min(args.verbose, 2)],
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+
+    cfg = load_joints_config(args.joints)
+    if args.robot_name:
+        cfg = JointsConfig(
+            robot_name=args.robot_name,
+            base_link=cfg.base_link,
+            joints=cfg.joints,
+            materials=cfg.materials,
+        )
+    package_name = args.package_name or args.out.name
+
+    args.out.mkdir(parents=True, exist_ok=True)
+
+    # Phase 1: load each mesh, write into the package, build Link records (relative paths).
+    rel_links: dict[str, Link] = {}
+    abs_paths: dict[str, Path] = {}
+    for inp in args.inputs:
+        try:
+            link, abs_visual = _load_mesh_to_link(inp, args.out, cfg)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        rel_links[link.name] = link
+        abs_paths[link.name] = abs_visual
+
+    # Phase 2: build joints + Robot AST.
+    try:
+        joints = _build_joints(cfg)
+        robot = Robot(
+            name=cfg.robot_name,
+            base_link=cfg.base_link,
+            links=rel_links,
+            joints=joints,
+        )
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+    # Phase 3: structural validation (issues are warnings, not blockers).
+    issues = validate_robot(robot)
+    for i in issues:
+        log.warning("validation issue: %s on %s — %s", i.kind, i.target, i.detail)
+
+    # Phase 4: emit URDF with absolute paths so inertia auto-computes.
+    abs_links = {n: _with_absolute_visual(rel_links[n], abs_paths[n]) for n in rel_links}
+    abs_robot = Robot(
+        name=robot.name,
+        base_link=robot.base_link,
+        links=abs_links,
+        joints=robot.joints,
+    )
+
+    urdf_path = args.out / "urdf" / f"{cfg.robot_name}.urdf"
+    emit_urdf(abs_robot, urdf_path, package_name=package_name)
+
+    # Phase 5: scaffold ROS package files.
+    scaffold_ros_package(
+        out_dir=args.out,
+        package_name=package_name,
+        urdf_relpath=Path("urdf") / f"{cfg.robot_name}.urdf",
+        maintainer_name=args.maintainer,
+        maintainer_email=args.maintainer_email,
+    )
+
+    # Phase 6: re-emit URDF with package:// URIs (final, ROS-correct paths).
+    # NOTE: two-pass emit is a deliberate v1-alpha hack — first pass loads abs
+    # mesh paths so _emit_inertial can auto-compute mass+COM+inertia; second pass
+    # rewrites filenames as package:// URIs for ROS. v2 should split inertia
+    # computation out of the emitter.
+    emit_urdf(robot, urdf_path, package_name=package_name)
+
+    print(f"wrote {urdf_path}")
+
+    # Phase 7: optional ManipulaPy validation.
+    if not args.no_validate:
+        report = validate_urdf(urdf_path)
+        if report.ok:
+            print(f"ManipulaPy-compatible: {urdf_path}")
+        else:
+            print(
+                f"warning: ManipulaPy validation failed: {report.error}",
+                file=sys.stderr,
+            )
+            # don't exit nonzero — validation is informative, not blocking
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

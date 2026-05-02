@@ -1,0 +1,14 @@
+robot_name: two_cubes
+base_link: cube_a
+joints:
+  - name: weld
+    type: fixed
+    parent: cube_a
+    child: cube_b
+    axis: [1, 0, 0]
+    origin:
+      xyz: [2.0, 0.0, 0.0]
+      rpy: [0, 0, 0]
+materials:
+  cube_a: aluminum_6061
+  cube_b: steel_1018
