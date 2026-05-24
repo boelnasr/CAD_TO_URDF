@@ -25,9 +25,8 @@ def _imported_top_modules(path: Path) -> set[str]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 out.add(alias.name.split(".")[0])
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                out.add(node.module.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            out.add(node.module.split(".")[0])
     return out
 
 

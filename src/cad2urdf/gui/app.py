@@ -1,12 +1,21 @@
-"""QApplication entrypoint stub. Replaced by Task 0.2 with the real entrypoint."""
+"""QApplication entrypoint. Exposed as the `cad2urdf-gui` console script."""
 
 from __future__ import annotations
 
+import sys
+
+from PyQt6.QtWidgets import QApplication
+
 
 def main(argv: list[str] | None = None) -> int:
-    raise NotImplementedError(
-        "cad2urdf-gui is not implemented yet — Task 0.2 of the v1 GUI plan ships it."
-    )
+    app = QApplication(argv if argv is not None else sys.argv)
+    # MainWindow import is deferred until Task 3.1 lands. For now we just exit
+    # cleanly so the entrypoint is callable from CI (--exit-after-init).
+    from cad2urdf.gui.windows.main_window import MainWindow
+
+    win = MainWindow()
+    win.show()
+    return app.exec()
 
 
 if __name__ == "__main__":
