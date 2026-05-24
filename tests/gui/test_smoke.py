@@ -26,8 +26,8 @@ def test_gui_package_imports() -> None:
 
 
 def test_qapplication_constructs(qtbot) -> None:
+    _ = qtbot  # injected by pytest-qt
     from PyQt6.QtWidgets import QApplication
 
-    _ = qtbot  # fixture ensures a QApplication exists for this test
-    app = QApplication.instance() or QApplication([])
+    app = QApplication.instance()
     assert app is not None
