@@ -52,3 +52,12 @@ def test_worker_progress_signal_fires(qtbot) -> None:
         w.start()
 
     assert received == [(1, 3, "step 1"), (2, 3, "step 2"), (3, 3, "step 3")]
+
+
+def test_worker_thread_exits_after_finish(qtbot) -> None:
+    from cad2urdf.gui.workers.base import Worker
+
+    w = Worker(lambda _report: 1)
+    with qtbot.waitSignal(w.finished, timeout=2000):
+        w.start()
+    assert not w._thread.isRunning()

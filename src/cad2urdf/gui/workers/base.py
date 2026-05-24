@@ -8,11 +8,14 @@ value comes back via `finished`; any exception becomes a `failed` signal
 
 from __future__ import annotations
 
+import logging
 import traceback
 from collections.abc import Callable
 from typing import Any
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
+
+_log = logging.getLogger(__name__)
 
 ProgressReporter = Callable[[int, int, str], None]
 JobFunc = Callable[[ProgressReporter], Any]
@@ -30,7 +33,7 @@ class _JobRunner(QObject):
     def run(self) -> None:
         try:
             result = self._job(lambda c, t, m: self.progress.emit(c, t, m))
-        except Exception as e:
+        except BaseException as e:
             self.failed.emit(str(e), traceback.format_exc())
             return
         self.finished.emit(result)
@@ -56,12 +59,16 @@ class Worker(QObject):
     def start(self) -> None:
         self._thread.start()
 
+    def _shutdown_thread(self) -> None:
+        self._thread.quit()
+        if not self._thread.wait(2000):
+            _log.warning("Worker thread did not exit within 2 s; forcing termination.")
+            self._thread.terminate()
+
     def _on_finished(self, result: Any) -> None:
         self.finished.emit(result)
-        self._thread.quit()
-        self._thread.wait(2000)
+        self._shutdown_thread()
 
     def _on_failed(self, err: str, trace: str) -> None:
         self.failed.emit(err, trace)
-        self._thread.quit()
-        self._thread.wait(2000)
+        self._shutdown_thread()
