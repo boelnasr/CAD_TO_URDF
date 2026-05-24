@@ -40,16 +40,17 @@ class MainWindow(QMainWindow):
 
     # ---- construction helpers ----------------------------------------------
     def _build_docks(self) -> None:
+        from cad2urdf.gui.panels.joint_editor import JointEditorDock
         from cad2urdf.gui.panels.link_tree import LinkTreeDock
 
         self.dock_link_tree = LinkTreeDock(self.controller, self)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_link_tree)
 
-        # Placeholders. Real widgets land in Tasks 5.1 / 6.1.
-        self.dock_joint_editor = QDockWidget("Joint Editor", self)
-        self.dock_joint_editor.setWidget(QLabel("(joint editor)"))
+        self.dock_joint_editor = JointEditorDock(self.controller, self)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_joint_editor)
+        self.dock_link_tree.linkSelected.connect(self.dock_joint_editor.show_link)
 
+        # Placeholder. Real widget lands in Task 6.1.
         self.dock_inertia_editor = QDockWidget("Inertia Editor", self)
         self.dock_inertia_editor.setWidget(QLabel("(inertia editor)"))
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_inertia_editor)
