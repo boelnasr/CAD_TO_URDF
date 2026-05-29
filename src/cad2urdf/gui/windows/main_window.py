@@ -212,3 +212,40 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"validation OK ({ast_n} AST notices, ManipulaPy skipped)", 10000
             )
+
+    # ---- export action --------------------------------------------------------
+    def _on_export_clicked(self) -> None:
+        from PyQt6.QtWidgets import QFileDialog, QInputDialog
+
+        from cad2urdf.gui.dialogs.export_package import run_export_into_dir
+
+        out_str = QFileDialog.getExistingDirectory(self, "Choose output directory", "")
+        if not out_str:
+            return
+        package_name, ok = QInputDialog.getText(
+            self,
+            "Package name",
+            "ROS package name (lowercase, underscores):",
+            text=Path(out_str).name,
+        )
+        if not ok or not package_name.strip():
+            return
+        try:
+            report = run_export_into_dir(
+                controller=self.controller,
+                out_dir=Path(out_str),
+                package_name=package_name.strip(),
+                maintainer="cad2urdf-user",
+                maintainer_email="user@example.com",
+                run_manipulapy=True,
+            )
+        except RuntimeError as e:
+            self.statusBar().showMessage(f"export failed: {e}", 8000)
+            return
+        if report.manipulapy_ok is True:
+            ok_label = "ManipulaPy-compatible"
+        elif report.manipulapy_ok is None:
+            ok_label = "ManipulaPy: skipped"
+        else:
+            ok_label = f"ManipulaPy: {report.manipulapy_error}"
+        self.statusBar().showMessage(f"wrote {report.urdf_path} ({ok_label})", 12000)
