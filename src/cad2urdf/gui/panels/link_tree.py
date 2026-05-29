@@ -7,7 +7,7 @@ and the viewport can stay keyed to the same link.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import QDockWidget, QTreeView, QWidget
 
@@ -32,6 +32,9 @@ class LinkTreeDock(QDockWidget):
         self._model = QStandardItemModel(self)
         self.tree_view.setModel(self._model)
         self.setWidget(self.tree_view)
+
+        self.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree_view.customContextMenuRequested.connect(self._show_context_menu)
 
         self.tree_view.selectionModel().currentChanged.connect(self._on_current_changed)
         controller.robotChanged.connect(self._rebuild)
@@ -59,3 +62,57 @@ class LinkTreeDock(QDockWidget):
         name = self._model.data(current)
         if isinstance(name, str) and name:
             self.linkSelected.emit(name)
+
+    def reparent_link(self, link_name: str, *, new_parent: str) -> None:
+        """Move the joint whose child is `link_name` so that its parent is `new_parent`."""
+        from cad2urdf.core.kinematic.tree import descendants_of, reparent_joint
+
+        if link_name == new_parent:
+            raise ValueError(f"cannot drop link {link_name!r} onto itself")
+
+        robot = self._controller.current()
+        if new_parent in descendants_of(robot, link_name):
+            raise ValueError(f"reparenting {link_name!r} under {new_parent!r} would create a cycle")
+
+        joint = next((j for j in robot.joints.values() if j.child == link_name), None)
+        if joint is None:
+            raise ValueError(f"link {link_name!r} has no parent joint to reparent")
+
+        self._controller.apply(
+            lambda r: reparent_joint(r, joint.name, new_parent=new_parent),
+            label=f"reparent {link_name} under {new_parent}",
+        )
+
+    def _show_context_menu(self, pos: object) -> None:
+        from PyQt6.QtGui import QAction
+        from PyQt6.QtWidgets import QInputDialog, QMenu
+
+        idx = self.tree_view.indexAt(pos)
+        if not idx.isValid():
+            return
+        link_name = self._model.data(idx)
+        if not isinstance(link_name, str):
+            return
+
+        menu = QMenu(self.tree_view)
+        act = QAction(f"Reparent {link_name}…", menu)
+
+        def _do() -> None:
+            names = [k for k in self._controller.current().links if k != link_name]
+            if not names:
+                return
+            target, ok = QInputDialog.getItem(
+                self.tree_view, "Reparent", "New parent:", names, 0, False
+            )
+            if not ok:
+                return
+            try:
+                self.reparent_link(link_name, new_parent=target)
+            except ValueError as e:
+                win = self.window()
+                if win is not None and hasattr(win, "statusBar"):
+                    win.statusBar().showMessage(f"reparent failed: {e}", 6000)
+
+        act.triggered.connect(_do)
+        menu.addAction(act)
+        menu.exec(self.tree_view.viewport().mapToGlobal(pos))

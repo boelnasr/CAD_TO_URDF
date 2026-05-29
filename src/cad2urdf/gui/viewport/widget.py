@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any
 
 import pyvista as pv
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from cad2urdf.core.kinematic.model import Robot
@@ -31,6 +32,8 @@ from cad2urdf.gui.state.controller import RobotController
 
 class ViewportWidget(QWidget):
     """QWidget wrapping a pyvista plotter with one actor per robot link."""
+
+    linkPicked = pyqtSignal(str)  # noqa: N815
 
     def __init__(self, controller: RobotController, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -58,11 +61,27 @@ class ViewportWidget(QWidget):
         controller.robotChanged.connect(self._rebuild)
         self._rebuild(controller.current())
 
+        # Mesh picking. pyvistaqt routes left-clicks on actors through this callback.
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            self.plotter.enable_mesh_picking(
+                callback=self.handle_pick, show=False, show_message=False
+            )
+
     # ---- public API --------------------------------------------------------
 
     def actors_by_link_name(self) -> dict[str, Any]:
         """Return a copy of the {link_name: actor} dict."""
         return dict(self._actors)
+
+    def handle_pick(self, picked_actor: Any) -> None:
+        """Resolve a picked actor to a link name and emit linkPicked."""
+        from cad2urdf.gui.viewport.pick import resolve_picked_link
+
+        name = resolve_picked_link(picked_actor, self._actors)
+        if name is not None:
+            self.linkPicked.emit(name)
 
     # ---- private -----------------------------------------------------------
 

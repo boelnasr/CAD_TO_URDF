@@ -53,6 +53,10 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_inertia_editor)
         self.dock_link_tree.linkSelected.connect(self.dock_inertia_editor.show_link)
 
+        # Viewport pick → select that link in the tree (which cascades to the
+        # joint + inertia editors via the existing linkSelected connections).
+        self.viewport.linkPicked.connect(self._select_link_in_tree)
+
     def _build_actions(self) -> None:
         self.action_open = QAction("&Open Project…", self, shortcut=QKeySequence.StandardKey.Open)
         self.action_save = QAction("&Save Project…", self, shortcut=QKeySequence.StandardKey.Save)
@@ -113,6 +117,24 @@ class MainWindow(QMainWindow):
         tb.addAction(self.action_redo)
         tb.addSeparator()
         tb.addAction(self.action_validate)
+
+    # ---- viewport pick → tree selection ------------------------------------
+    def _select_link_in_tree(self, link_name: str) -> None:
+        model = self.dock_link_tree.tree_view.model()
+
+        def _walk(parent_index) -> bool:
+            for row in range(model.rowCount(parent_index)):
+                idx = model.index(row, 0, parent_index)
+                if model.data(idx) == link_name:
+                    self.dock_link_tree.tree_view.setCurrentIndex(idx)
+                    return True
+                if _walk(idx):
+                    return True
+            return False
+
+        from PyQt6.QtCore import QModelIndex
+
+        _walk(QModelIndex())  # start from the invisible root
 
     # ---- controller signals ------------------------------------------------
     def _on_history_changed(self, label: str) -> None:
