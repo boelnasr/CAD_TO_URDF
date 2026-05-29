@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
@@ -35,6 +37,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
 
         self.controller.historyChanged.connect(self._on_history_changed)
+        self.action_validate.triggered.connect(self._on_validate_clicked)
+        self.action_import.triggered.connect(self._on_import_clicked)
+        self.action_export.triggered.connect(self._on_export_clicked)
+        self._validate_worker = None
 
     # ---- construction helpers ----------------------------------------------
     def _build_docks(self) -> None:
@@ -141,3 +147,68 @@ class MainWindow(QMainWindow):
         self.action_undo.setEnabled(self.controller.can_undo())
         self.action_redo.setEnabled(self.controller.can_redo())
         self.statusBar().showMessage(f"{label}", 4000)
+
+    # ---- import action -----------------------------------------------------
+    def _on_import_clicked(self) -> None:
+        from PyQt6.QtWidgets import QFileDialog, QInputDialog
+
+        from cad2urdf.gui.dialogs.import_meshes import run_import_into_controller
+
+        paths_str, _filter = QFileDialog.getOpenFileNames(
+            self, "Import meshes", "", "Meshes (*.stl *.obj)"
+        )
+        if not paths_str:
+            return
+        robot_name, ok = QInputDialog.getText(self, "Robot name", "Robot name:", text="my_robot")
+        if not ok or not robot_name.strip():
+            return
+        try:
+            run_import_into_controller(
+                controller=self.controller,
+                mesh_paths=[Path(p) for p in paths_str],
+                robot_name=robot_name.strip(),
+            )
+        except RuntimeError as e:
+            self.statusBar().showMessage(f"import failed: {e}", 8000)
+
+    # ---- validate action ---------------------------------------------------
+    def _on_validate_clicked(self) -> None:
+        import tempfile
+
+        from cad2urdf.gui.workers.base import Worker
+        from cad2urdf.gui.workers.validate import build_validate_job
+
+        scratch = Path(tempfile.mkdtemp(prefix="cad2urdf_validate_"))
+        robot = self.controller.current()
+        worker = Worker(
+            build_validate_job(
+                robot=robot,
+                out_dir=scratch,
+                package_name=f"{robot.name}_pkg",
+                urdf_relname=f"{robot.name}.urdf",
+                run_manipulapy=True,
+            )
+        )
+        worker.finished.connect(self._on_validate_done)
+        worker.failed.connect(
+            lambda err, _t: self.statusBar().showMessage(f"validate failed: {err}", 8000)
+        )
+        self.statusBar().showMessage("validating…", 8000)
+        worker.start()
+        self._validate_worker = worker  # keep a reference alive
+
+    def _on_validate_done(self, report: object) -> None:
+        ast_n = len(report.ast_issues)  # type: ignore[attr-defined]
+        if report.manipulapy_ok is True:  # type: ignore[attr-defined]
+            self.statusBar().showMessage(
+                f"validation OK ({ast_n} AST notices, ManipulaPy-compatible)", 10000
+            )
+        elif report.manipulapy_ok is False:  # type: ignore[attr-defined]
+            self.statusBar().showMessage(
+                f"validation issues: {ast_n} AST notices; ManipulaPy: {report.manipulapy_error}",  # type: ignore[attr-defined]
+                12000,
+            )
+        else:
+            self.statusBar().showMessage(
+                f"validation OK ({ast_n} AST notices, ManipulaPy skipped)", 10000
+            )
