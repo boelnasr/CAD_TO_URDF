@@ -11,3 +11,4 @@ build/
 *.urdf.bak
 .DS_Store
 tests/fixtures/meshes/*.stl
+.codebuddy
