@@ -5,7 +5,6 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
-    QLabel,
     QMainWindow,
     QWidget,
 )
@@ -23,10 +22,10 @@ class MainWindow(QMainWindow):
 
         self.controller = RobotController()
 
-        # Central placeholder — replaced by the VTK viewport in Task 7.1.
-        self._central_placeholder = QLabel("3D viewport will appear here once a project is loaded.")
-        self._central_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setCentralWidget(self._central_placeholder)
+        from cad2urdf.gui.viewport.widget import ViewportWidget
+
+        self.viewport = ViewportWidget(self.controller, self)
+        self.setCentralWidget(self.viewport)
 
         self._build_docks()
         self._build_actions()

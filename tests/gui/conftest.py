@@ -11,6 +11,12 @@ import trimesh
 # Must be set BEFORE PyQt6 is imported anywhere in the test session.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# Must be set BEFORE pyvista is imported so pv.OFF_SCREEN is True from the start.
+# QVTKRenderWindowInteractor (used by pyvistaqt.QtInteractor) issues a fatal
+# X11 BadWindow error when Qt uses the offscreen platform plugin — pyvista's
+# plain Plotter(off_screen=True) is used instead during tests.  See widget.py.
+os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
+
 # Avoid the ROS launch_testing pytest plugin (lark crash) — see CLAUDE.md memory.
 os.environ.pop("PYTHONPATH", None)
 os.environ.pop("AMENT_PREFIX_PATH", None)

@@ -84,7 +84,11 @@ class JointEditorDock(QDockWidget):
             return
 
         match = next(
-            (joint for joint in robot.joints.values() if joint.parent == parent and joint.child == link_name),
+            (
+                joint
+                for joint in robot.joints.values()
+                if joint.parent == parent and joint.child == link_name
+            ),
             None,
         )
         if match is None:
