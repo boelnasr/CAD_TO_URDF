@@ -5,7 +5,6 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
-    QDockWidget,
     QLabel,
     QMainWindow,
     QWidget,
@@ -40,6 +39,7 @@ class MainWindow(QMainWindow):
 
     # ---- construction helpers ----------------------------------------------
     def _build_docks(self) -> None:
+        from cad2urdf.gui.panels.inertia_editor import InertiaEditorDock
         from cad2urdf.gui.panels.joint_editor import JointEditorDock
         from cad2urdf.gui.panels.link_tree import LinkTreeDock
 
@@ -50,10 +50,9 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_joint_editor)
         self.dock_link_tree.linkSelected.connect(self.dock_joint_editor.show_link)
 
-        # Placeholder. Real widget lands in Task 6.1.
-        self.dock_inertia_editor = QDockWidget("Inertia Editor", self)
-        self.dock_inertia_editor.setWidget(QLabel("(inertia editor)"))
+        self.dock_inertia_editor = InertiaEditorDock(self.controller, self)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_inertia_editor)
+        self.dock_link_tree.linkSelected.connect(self.dock_inertia_editor.show_link)
 
     def _build_actions(self) -> None:
         self.action_open = QAction("&Open Project…", self, shortcut=QKeySequence.StandardKey.Open)
