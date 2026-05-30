@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import cast
 
 import numpy as np
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
     QDockWidget,
@@ -35,6 +36,8 @@ def _make_spin(lo: float, hi: float, decimals: int = 4) -> QDoubleSpinBox:
 class JointEditorDock(QDockWidget):
     """Form panel that edits the joint parenting the selected link."""
 
+    axisPickRequested = pyqtSignal()  # noqa: N815
+
     def __init__(self, controller: RobotController, parent: QWidget | None = None) -> None:
         super().__init__("Joint Editor", parent)
         self._controller = controller
@@ -56,6 +59,10 @@ class JointEditorDock(QDockWidget):
         axis_holder = QWidget()
         axis_holder.setLayout(axis_row)
         form.addRow("Axis (xyz)", axis_holder)
+
+        self.pick_axis_button = QPushButton("Pick axis from viewport (two clicks)")
+        self.pick_axis_button.clicked.connect(self._on_pick_axis_requested)
+        form.addRow(self.pick_axis_button)
 
         self.lower_limit = _make_spin(-1e6, 1e6)
         self.upper_limit = _make_spin(-1e6, 1e6)
@@ -172,3 +179,11 @@ class JointEditorDock(QDockWidget):
         status_bar = getattr(self.window(), "statusBar", None)
         if callable(status_bar):
             status_bar().showMessage(message, timeout_ms)
+
+    def _on_pick_axis_requested(self) -> None:
+        self.axisPickRequested.emit()
+
+    def set_axis(self, axis: object) -> None:
+        self.axis_x.setValue(float(axis[0]))  # type: ignore[index]
+        self.axis_y.setValue(float(axis[1]))  # type: ignore[index]
+        self.axis_z.setValue(float(axis[2]))  # type: ignore[index]
