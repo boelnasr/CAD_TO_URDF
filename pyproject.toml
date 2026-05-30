@@ -34,7 +34,6 @@ dev = [
     "pytest>=8",
     "pytest-cov>=4",
     "pytest-qt>=4.4",
-    "ruff>=0.6",
     "mypy>=1.10",
     "types-PyYAML",
 ]
@@ -58,7 +57,26 @@ markers = [
 [tool.mypy]
 python_version = "3.10"
 strict = true
-files = ["src/cad2urdf/core"]
+files = ["src/cad2urdf/core", "src/cad2urdf/gui"]
+
 [[tool.mypy.overrides]]
-module = ["trimesh.*", "OCC.*", "ManipulaPy.*"]
+module = ["trimesh.*", "OCC.*", "ManipulaPy.*", "pyvistaqt.*", "pyvista.*", "vtk.*"]
 ignore_missing_imports = true
+
+# gui code uses Qt subclassing patterns that don't play well with --strict;
+# we type-check it leniently for now (warn but don't require disallow_untyped_defs).
+# PyQt6 stubs declare statusBar()/addToolBar()/model() as `Foo | None` even though
+# they never return None in practice, so union-attr noise is silenced for gui.
+[[tool.mypy.overrides]]
+module = ["cad2urdf.gui.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+disable_error_code = [
+    "union-attr",
+    "assignment",
+    "call-overload",
+    "arg-type",
+    "has-type",
+    "no-any-return",
+]

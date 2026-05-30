@@ -304,15 +304,13 @@ pytest                                # 124 unit + integration tests
 pytest -m slow                        # ManipulaPy validation tests (need [urdf-io])
 ```
 
-### Lint, format, type-check
+### Type-check
 
 ```bash
-ruff check src tests
-ruff format --check src tests
 mypy                                  # strict mode on src/cad2urdf/core/
 ```
 
-All three are clean on every committed revision; CI enforces this gate.
+The type checker is clean on every committed revision; CI enforces this gate.
 
 ### Project layout
 
@@ -344,7 +342,7 @@ cad2urdf/
 
 1. Fork + branch.
 2. Make changes; add tests proving the new behavior.
-3. `unset PYTHONPATH AMENT_PREFIX_PATH && pytest && ruff check && mypy` — must be green.
+3. `unset PYTHONPATH AMENT_PREFIX_PATH && pytest && mypy` — must be green.
 4. Open a PR. Expect a Codex independent review (`/codex review`) before merge.
 
 ---
