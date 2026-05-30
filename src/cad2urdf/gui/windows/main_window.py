@@ -40,6 +40,8 @@ class MainWindow(QMainWindow):
         self.action_validate.triggered.connect(self._on_validate_clicked)
         self.action_import.triggered.connect(self._on_import_clicked)
         self.action_export.triggered.connect(self._on_export_clicked)
+        self.action_save.triggered.connect(self._on_save_clicked)
+        self.action_open.triggered.connect(self._on_open_clicked)
         self._validate_worker = None
 
     # ---- construction helpers ----------------------------------------------
@@ -249,3 +251,46 @@ class MainWindow(QMainWindow):
         else:
             ok_label = f"ManipulaPy: {report.manipulapy_error}"
         self.statusBar().showMessage(f"wrote {report.urdf_path} ({ok_label})", 12000)
+
+    # ---- project save / open ------------------------------------------------
+    def _save_project_to(self, path: Path) -> None:
+        from cad2urdf.core.project.save import save_project
+
+        save_project(self.controller.current(), path)
+        self.statusBar().showMessage(f"saved {path}", 6000)
+
+    def _open_project_from(self, path: Path) -> None:
+        from cad2urdf.core.project.save import load_project
+
+        robot = load_project(path)
+        self.controller.replace(robot)
+        self.statusBar().showMessage(f"opened {path}", 6000)
+
+    def _on_save_clicked(self) -> None:
+        from PyQt6.QtWidgets import QFileDialog
+
+        path_str, _ = QFileDialog.getSaveFileName(
+            self, "Save project", "", "cad2urdf project (*.cad2urdf)"
+        )
+        if not path_str:
+            return
+        path = Path(path_str)
+        if path.suffix != ".cad2urdf":
+            path = path.with_suffix(".cad2urdf")
+        try:
+            self._save_project_to(path)
+        except OSError as e:
+            self.statusBar().showMessage(f"save failed: {e}", 8000)
+
+    def _on_open_clicked(self) -> None:
+        from PyQt6.QtWidgets import QFileDialog
+
+        path_str, _ = QFileDialog.getOpenFileName(
+            self, "Open project", "", "cad2urdf project (*.cad2urdf)"
+        )
+        if not path_str:
+            return
+        try:
+            self._open_project_from(Path(path_str))
+        except (OSError, ValueError) as e:
+            self.statusBar().showMessage(f"open failed: {e}", 8000)
