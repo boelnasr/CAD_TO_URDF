@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import replace as dc_replace
+from dataclasses import asdict, replace as dc_replace
 from pathlib import Path
 from typing import Any
 
@@ -19,10 +19,12 @@ from cad2urdf.core.config.loader import origin_from_xyz_rpy
 from cad2urdf.core.inertia.materials import list_materials, lookup
 from cad2urdf.core.kinematic.model import Joint, Robot
 from cad2urdf.core.kinematic.tree import remove_link, rename_link, reparent_joint, set_base_link
-from cad2urdf.core.project.save import robot_to_payload
+from cad2urdf.core.project.save import load_project, robot_to_payload, save_project
 from cad2urdf.gui.control import protocol
 from cad2urdf.gui.state.controller import RobotController
+from cad2urdf.gui.workers.export_package import build_export_job
 from cad2urdf.gui.workers.import_meshes import build_import_job
+from cad2urdf.gui.workers.validate import build_validate_job
 
 _log = logging.getLogger(__name__)
 
@@ -162,3 +164,47 @@ class CommandDispatcher:
 
         self._controller.apply(transform, label=f"edit joint {joint_name}")
         return robot_to_payload(self._controller.current())
+
+    # ---- project / export ---------------------------------------------------
+    def _cmd_save_project(self, args: dict[str, Any]) -> dict[str, Any]:
+        save_project(self._controller.current(), Path(args["path"]))
+        return {"saved": args["path"]}
+
+    def _cmd_open_project(self, args: dict[str, Any]) -> dict[str, Any]:
+        robot = load_project(Path(args["path"]))
+        self._controller.replace(robot)
+        return robot_to_payload(self._controller.current())
+
+    def _cmd_validate(self, args: dict[str, Any]) -> dict[str, Any]:
+        robot = self._controller.current()
+        job = build_validate_job(
+            robot=robot,
+            out_dir=Path(args["out_dir"]),
+            package_name=args["package_name"],
+            urdf_relname=f"{robot.name}.urdf",
+            run_manipulapy=bool(args.get("run_manipulapy", False)),
+        )
+        report = job(lambda c, t, m: None)
+        return {
+            "ast_issues": [asdict(i) for i in report.ast_issues],
+            "urdf_written": report.urdf_written,
+            "urdf_path": str(report.urdf_path),
+            "manipulapy_ok": report.manipulapy_ok,
+            "manipulapy_error": report.manipulapy_error,
+        }
+
+    def _cmd_export_package(self, args: dict[str, Any]) -> dict[str, Any]:
+        job = build_export_job(
+            robot=self._controller.current(),
+            out_dir=Path(args["out_dir"]),
+            package_name=args["package_name"],
+            maintainer=args.get("maintainer", "cad2urdf-user"),
+            maintainer_email=args.get("maintainer_email", "user@example.com"),
+            run_manipulapy=bool(args.get("run_manipulapy", False)),
+        )
+        report = job(lambda c, t, m: None)
+        return {
+            "urdf_path": str(report.urdf_path),
+            "manipulapy_ok": report.manipulapy_ok,
+            "manipulapy_error": report.manipulapy_error,
+        }
