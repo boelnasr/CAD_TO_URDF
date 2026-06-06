@@ -13,9 +13,12 @@ from dataclasses import replace as dc_replace
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
+from cad2urdf.core.config.loader import origin_from_xyz_rpy
 from cad2urdf.core.inertia.materials import list_materials, lookup
-from cad2urdf.core.kinematic.model import Robot
-from cad2urdf.core.kinematic.tree import remove_link, rename_link, set_base_link
+from cad2urdf.core.kinematic.model import Joint, Robot
+from cad2urdf.core.kinematic.tree import remove_link, rename_link, reparent_joint, set_base_link
 from cad2urdf.core.project.save import robot_to_payload
 from cad2urdf.gui.control import protocol
 from cad2urdf.gui.state.controller import RobotController
@@ -110,4 +113,52 @@ class CommandDispatcher:
             return dc_replace(robot, links=new_links, joints=dict(robot.joints))
 
         self._controller.apply(transform, label=f"material {link_name}")
+        return robot_to_payload(self._controller.current())
+
+    # ---- joints -------------------------------------------------------------
+    def _cmd_update_joint(self, args: dict[str, Any]) -> dict[str, Any]:
+        joint_name = args["joint"]
+        new_parent = args.get("parent")
+        jtype = args.get("type")
+        axis_in = args.get("axis")
+        xyz = args.get("origin_xyz")
+        rpy = args.get("origin_rpy")
+        if (xyz is None) != (rpy is None):
+            raise ValueError("origin_xyz and origin_rpy must be provided together")
+
+        def transform(robot: Robot) -> Robot:
+            work = reparent_joint(robot, joint_name, new_parent) if new_parent else robot
+            old = work.joints[joint_name]
+            if axis_in is None:
+                axis = old.axis
+            else:
+                vec = np.asarray(axis_in, dtype=float)
+                norm = float(np.linalg.norm(vec))
+                if norm == 0.0:
+                    raise ValueError("axis must be non-zero")
+                axis = vec / norm
+            origin = old.origin if xyz is None else origin_from_xyz_rpy(list(xyz), list(rpy))
+            new_joint = Joint(
+                name=old.name,
+                type=jtype or old.type,
+                parent=old.parent,
+                child=old.child,
+                axis=axis,
+                origin=origin,
+                # absent key → keep old value; explicit null → clear it
+                limit_lower=args.get("limit_lower", old.limit_lower),
+                limit_upper=args.get("limit_upper", old.limit_upper),
+                effort=args.get("effort", old.effort),
+                velocity=args.get("velocity", old.velocity),
+            )
+            new_joints = dict(work.joints)
+            new_joints[joint_name] = new_joint
+            return Robot(
+                name=work.name,
+                base_link=work.base_link,
+                links=dict(work.links),
+                joints=new_joints,
+            )
+
+        self._controller.apply(transform, label=f"edit joint {joint_name}")
         return robot_to_payload(self._controller.current())
