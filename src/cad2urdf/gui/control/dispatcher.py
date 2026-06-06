@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace as dc_replace
+from pathlib import Path
 from typing import Any
 
-from cad2urdf.core.inertia.materials import list_materials
+from cad2urdf.core.inertia.materials import list_materials, lookup
+from cad2urdf.core.kinematic.model import Robot
+from cad2urdf.core.kinematic.tree import remove_link, rename_link, set_base_link
 from cad2urdf.core.project.save import robot_to_payload
 from cad2urdf.gui.control import protocol
 from cad2urdf.gui.state.controller import RobotController
+from cad2urdf.gui.workers.import_meshes import build_import_job
 
 _log = logging.getLogger(__name__)
 
@@ -67,3 +72,42 @@ class CommandDispatcher:
     def _cmd_gui_status(self, args: dict[str, Any]) -> dict[str, Any]:
         robot = self._controller.current()
         return {"running": True, "robot_name": robot.name, "link_count": len(robot.links)}
+
+    # ---- build --------------------------------------------------------------
+    def _cmd_import_meshes(self, args: dict[str, Any]) -> dict[str, Any]:
+        paths = [Path(p) for p in args["paths"]]
+        robot_name = args.get("robot_name", "robot")
+        job = build_import_job(paths=paths, robot_name=robot_name)
+        robot = job(lambda c, t, m: None)  # run synchronously on the Qt thread
+        self._controller.replace(robot)
+        return robot_to_payload(self._controller.current())
+
+    def _cmd_rename_link(self, args: dict[str, Any]) -> dict[str, Any]:
+        old, new = args["old"], args["new"]
+        self._controller.apply(lambda r: rename_link(r, old, new), label=f"rename {old}")
+        return robot_to_payload(self._controller.current())
+
+    def _cmd_remove_link(self, args: dict[str, Any]) -> dict[str, Any]:
+        name = args["link"]
+        self._controller.apply(lambda r: remove_link(r, name), label=f"remove {name}")
+        return robot_to_payload(self._controller.current())
+
+    def _cmd_set_base_link(self, args: dict[str, Any]) -> dict[str, Any]:
+        name = args["link"]
+        self._controller.apply(lambda r: set_base_link(r, name), label=f"base {name}")
+        return robot_to_payload(self._controller.current())
+
+    def _cmd_set_link_material(self, args: dict[str, Any]) -> dict[str, Any]:
+        link_name, material_name = args["link"], args["material"]
+        material = lookup(material_name)  # raises KeyError on unknown material
+
+        def transform(robot: Robot) -> Robot:
+            old = robot.links[link_name]
+            new_link = dc_replace(
+                old, material_density=material.density_kg_m3, material_name=material.name
+            )
+            new_links = {**robot.links, link_name: new_link}
+            return dc_replace(robot, links=new_links, joints=dict(robot.joints))
+
+        self._controller.apply(transform, label=f"material {link_name}")
+        return robot_to_payload(self._controller.current())
