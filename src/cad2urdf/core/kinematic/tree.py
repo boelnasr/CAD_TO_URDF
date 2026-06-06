@@ -97,3 +97,35 @@ def reparent_joint(robot: Robot, joint_name: str, new_parent: str) -> Robot:
         velocity=j.velocity,
     )
     return new
+
+
+def rename_link(robot: Robot, old: str, new: str) -> Robot:
+    """Rename a link and fix up every joint and the base reference."""
+    if old not in robot.links:
+        raise ValueError(f"link {old!r} not in robot")
+    if not new:
+        raise ValueError("new link name must not be empty")
+    if new in robot.links:
+        raise ValueError(f"link {new!r} already exists")
+
+    work = deepcopy(robot)
+    link = work.links.pop(old)
+    link.name = new
+    work.links[new] = link
+
+    new_joints: dict[str, Joint] = {}
+    for jn, j in work.joints.items():
+        new_joints[jn] = Joint(
+            name=j.name,
+            type=j.type,
+            parent=new if j.parent == old else j.parent,
+            child=new if j.child == old else j.child,
+            axis=j.axis,
+            origin=j.origin,
+            limit_lower=j.limit_lower,
+            limit_upper=j.limit_upper,
+            effort=j.effort,
+            velocity=j.velocity,
+        )
+    base = new if work.base_link == old else work.base_link
+    return Robot(name=work.name, base_link=base, links=work.links, joints=new_joints)
