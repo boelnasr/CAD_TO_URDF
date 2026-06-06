@@ -36,11 +36,17 @@ dev = [
     "pytest-qt>=4.4",
     "mypy>=1.10",
     "types-PyYAML",
+    "tomli>=2; python_version < '3.11'",
+]
+# Install as: pip install -e ".[dev,mcp]" to expose the GUI to MCP clients.
+mcp = [
+    "mcp>=1.2.0,<2",
 ]
 
 [project.scripts]
 cad2urdf = "cad2urdf.cli.main:main"
 cad2urdf-gui = "cad2urdf.gui.app:main"
+cad2urdf-mcp = "cad2urdf.mcp.server:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -57,7 +63,7 @@ markers = [
 [tool.mypy]
 python_version = "3.10"
 strict = true
-files = ["src/cad2urdf/core", "src/cad2urdf/gui"]
+files = ["src/cad2urdf/core", "src/cad2urdf/gui", "src/cad2urdf/mcp"]
 
 [[tool.mypy.overrides]]
 module = ["trimesh.*", "OCC.*", "ManipulaPy.*", "pyvistaqt.*", "pyvista.*", "vtk.*"]
