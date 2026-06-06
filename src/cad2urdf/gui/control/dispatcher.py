@@ -7,6 +7,7 @@ result; the public ``dispatch`` wraps them in ok/err envelopes and never raises.
 
 from __future__ import annotations
 
+import base64
 import logging
 from collections.abc import Callable
 from dataclasses import asdict, replace as dc_replace
@@ -27,6 +28,10 @@ from cad2urdf.gui.workers.import_meshes import build_import_job
 from cad2urdf.gui.workers.validate import build_validate_job
 
 _log = logging.getLogger(__name__)
+
+
+class _NoWindow(RuntimeError):
+    """Raised when an operation requires a live window that has not been wired."""
 
 
 class CommandDispatcher:
@@ -55,6 +60,8 @@ class CommandDispatcher:
             return protocol.err("not_implemented", f"command {command!r} has no handler")
         try:
             return protocol.ok(handler(args))
+        except _NoWindow as e:
+            return protocol.err("no_window", str(e))
         except (ValueError, KeyError, FileNotFoundError, TypeError) as e:
             return protocol.err(type(e).__name__, str(e))
         except Exception as e:  # noqa: BLE001 - never let a command crash the GUI
@@ -208,3 +215,18 @@ class CommandDispatcher:
             "manipulapy_ok": report.manipulapy_ok,
             "manipulapy_error": report.manipulapy_error,
         }
+
+    # ---- control / visual ---------------------------------------------------
+    def _cmd_undo(self, args: dict[str, Any]) -> dict[str, Any]:
+        self._controller.undo()
+        return robot_to_payload(self._controller.current())
+
+    def _cmd_redo(self, args: dict[str, Any]) -> dict[str, Any]:
+        self._controller.redo()
+        return robot_to_payload(self._controller.current())
+
+    def _cmd_screenshot(self, args: dict[str, Any]) -> dict[str, str]:
+        if self._grab_png is None:
+            raise _NoWindow("no live window to screenshot")
+        png = self._grab_png()
+        return {"png_base64": base64.b64encode(png).decode("ascii")}
