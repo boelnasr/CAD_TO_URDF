@@ -117,15 +117,20 @@ def _joint_from_dict(d: dict[str, Any]) -> Joint:
     )
 
 
-def save_project(robot: Robot, path: Path) -> None:
-    """Serialize ``robot`` to a .cad2urdf JSON file at ``path``."""
-    payload = {
+def robot_to_payload(robot: Robot) -> dict[str, Any]:
+    """Serialize a Robot to a plain JSON-able dict at the current SCHEMA_VERSION."""
+    return {
         "schema_version": SCHEMA_VERSION,
         "name": robot.name,
         "base_link": robot.base_link,
         "links": [_link_to_dict(robot.links[k]) for k in sorted(robot.links)],
         "joints": [_joint_to_dict(robot.joints[k]) for k in sorted(robot.joints)],
     }
+
+
+def save_project(robot: Robot, path: Path) -> None:
+    """Serialize ``robot`` to a .cad2urdf JSON file at ``path``."""
+    payload = robot_to_payload(robot)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
