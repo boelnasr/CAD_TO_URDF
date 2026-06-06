@@ -182,6 +182,63 @@ ros2 launch iiwa14_description/launch/display.launch.py       # view the arm in 
 
 ---
 
+## MCP Server (drive the GUI from Claude)
+
+`cad2urdf` ships an MCP server that **launches the GUI and lets an MCP client
+(e.g. Claude) operate it end-to-end** — import meshes, edit the kinematic tree,
+validate, export a ROS package, and screenshot the live window.
+
+```bash
+pip install -e ".[mcp]"      # adds the MCP SDK
+```
+
+Register it with your MCP client (Claude Code example):
+
+```bash
+claude mcp add cad2urdf -- cad2urdf-mcp
+```
+
+The server spawns the GUI on first use over a private Unix-domain socket (no
+network exposure), then proxies high-level commands onto the GUI's main thread:
+
+```mermaid
+flowchart LR
+    Claude([Claude / MCP client]) -->|MCP stdio| MCP[cad2urdf-mcp]
+    MCP -->|spawns child| GUI[cad2urdf GUI]
+    MCP <-->|JSON lines over<br/>local socket| CS[ControlServer]
+    CS --> DISP[CommandDispatcher]
+    DISP -->|pure transform| RC[RobotController]
+    RC -->|live update| UI[panels + viewport]
+```
+
+Every edit runs through the same `RobotController` a human uses, so changes render
+live and land on the undo/redo stack. Available tools:
+
+| Group | Tools |
+|---|---|
+| Introspect | `get_robot`, `list_materials`, `get_history`, `gui_status` |
+| Build | `import_meshes`, `set_base_link`, `rename_link`, `remove_link`, `set_link_material` |
+| Joints | `update_joint` (type / axis / origin / limits / reparent) |
+| Project / export | `save_project`, `open_project`, `validate`, `export_package` |
+| Control | `undo`, `redo`, `screenshot` (on-demand PNG) |
+
+A robot is a kinematic **tree**: each non-base link has exactly one incoming
+joint. Joints are created by `import_meshes`, removed by `remove_link`, and
+restructured by `update_joint(..., parent=...)`.
+
+### Headless / CI use
+
+The MCP server launches the GUI expecting a display (the human can watch it). To
+run it headless (no X server), export both of these before starting so the GUI
+and its VTK/PyVista viewport fall back to offscreen rendering:
+
+```bash
+export QT_QPA_PLATFORM=offscreen
+export PYVISTA_OFF_SCREEN=true
+```
+
+---
+
 ## CLI Reference
 
 ```
