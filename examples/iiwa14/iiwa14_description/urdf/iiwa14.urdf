@@ -1,0 +1,215 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="iiwa14">
+  <material name="aluminum_6061">
+    <color rgba="0.85 0.85 0.88 1" />
+  </material>
+  <link name="link_0">
+    <inertial>
+      <origin xyz="-0.0128816 -3.49637e-07 0.0715167" rpy="0 0 0" />
+      <mass value="14.7871" />
+      <inertia ixx="0.0654563" ixy="1.83028e-08" ixz="0.00181374" iyy="0.083267" iyz="-5.12473e-07" izz="0.0903836" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/visual/link_0.stl" />
+      </geometry>
+      <material name="aluminum_6061" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/collision/link_0.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_1">
+    <inertial>
+      <origin xyz="-5.90399e-07 -0.0222239 0.121239" rpy="0 0 0" />
+      <mass value="14.9618" />
+      <inertia ixx="0.11204" ixy="1.16198e-07" ixz="-2.58634e-07" iyy="0.112985" iyz="0.0138449" izz="0.0516862" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/visual/link_1.stl" />
+      </geometry>
+      <material name="aluminum_6061" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/collision/link_1.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_2">
+    <inertial>
+      <origin xyz="0.000288991 0.0642765 0.0322183" rpy="0 0 0" />
+      <mass value="13.4727" />
+      <inertia ixx="0.100245" ixy="-8.09226e-05" ixz="8.40645e-05" iyy="0.0428544" iyz="0.0152709" izz="0.0980723" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/visual/link_2.stl" />
+      </geometry>
+      <material name="aluminum_6061" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/collision/link_2.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_3">
+    <inertial>
+      <origin xyz="2.44616e-07 0.0232726 0.127154" rpy="0 0 0" />
+      <mass value="11.0134" />
+      <inertia ixx="0.0805966" ixy="1.15517e-07" ixz="1.18033e-07" iyy="0.0767845" iyz="-0.0118099" izz="0.0285557" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/visual/link_3.stl" />
+      </geometry>
+      <material name="aluminum_6061" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/collision/link_3.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_4">
+    <inertial>
+      <origin xyz="1.52472e-07 0.0696776 0.0255978" rpy="0 0 0" />
+      <mass value="9.44928" />
+      <inertia ixx="0.0552683" ixy="7.02606e-08" ixz="7.54142e-09" iyy="0.0240846" iyz="0.00806588" izz="0.0524755" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/visual/link_4.stl" />
+      </geometry>
+      <material name="aluminum_6061" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/collision/link_4.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_5">
+    <inertial>
+      <origin xyz="8.90392e-05 0.0244922 0.0975637" rpy="0 0 0" />
+      <mass value="7.37374" />
+      <inertia ixx="0.0439761" ixy="1.49919e-05" ixz="7.98647e-06" iyy="0.0408528" iyz="-0.0107892" izz="0.0175007" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/visual/link_5.stl" />
+      </geometry>
+      <material name="aluminum_6061" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/collision/link_5.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_6">
+    <inertial>
+      <origin xyz="-2.19867e-06 0.000607228 0.000316275" rpy="0 0 0" />
+      <mass value="4.87687" />
+      <inertia ixx="0.0131885" ixy="-2.17399e-07" ixz="-3.88063e-07" iyy="0.00960579" iyz="0.000654866" izz="0.0126247" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/visual/link_6.stl" />
+      </geometry>
+      <material name="aluminum_6061" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/collision/link_6.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="link_7">
+    <inertial>
+      <origin xyz="1.83052e-06 -1.89587e-07 0.0166295" rpy="0 0 0" />
+      <mass value="0.957962" />
+      <inertia ixx="0.000717439" ixy="1.13655e-10" ixz="1.26953e-08" iyy="0.000716639" iyz="-3.88505e-09" izz="0.0010612" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/visual/link_7.stl" />
+      </geometry>
+      <material name="aluminum_6061" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://iiwa14_description/meshes/collision/link_7.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_1" type="revolute">
+    <origin xyz="0 0 0.1575" rpy="0 0 0" />
+    <parent link="link_0" />
+    <child link="link_1" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.96706" upper="2.96706" effort="300" velocity="10" />
+  </joint>
+  <joint name="joint_2" type="revolute">
+    <origin xyz="0 0 0.2025" rpy="1.5708 0 -3.14159" />
+    <parent link="link_1" />
+    <child link="link_2" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.0944" upper="2.0944" effort="300" velocity="10" />
+  </joint>
+  <joint name="joint_3" type="revolute">
+    <origin xyz="0 0.2045 0" rpy="1.5708 0 -3.14159" />
+    <parent link="link_2" />
+    <child link="link_3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.96706" upper="2.96706" effort="300" velocity="10" />
+  </joint>
+  <joint name="joint_4" type="revolute">
+    <origin xyz="0 0 0.2155" rpy="1.5708 0 0" />
+    <parent link="link_3" />
+    <child link="link_4" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.0944" upper="2.0944" effort="300" velocity="10" />
+  </joint>
+  <joint name="joint_5" type="revolute">
+    <origin xyz="0 0.1845 0" rpy="1.5708 -2.06823e-13 -3.14159" />
+    <parent link="link_4" />
+    <child link="link_5" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.96706" upper="2.96706" effort="300" velocity="10" />
+  </joint>
+  <joint name="joint_6" type="revolute">
+    <origin xyz="0 0 0.2155" rpy="1.5708 0 0" />
+    <parent link="link_5" />
+    <child link="link_6" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.0944" upper="2.0944" effort="300" velocity="10" />
+  </joint>
+  <joint name="joint_7" type="revolute">
+    <origin xyz="0 0.081 0" rpy="1.5708 -2.06823e-13 -3.14159" />
+    <parent link="link_6" />
+    <child link="link_7" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.05433" upper="3.05433" effort="300" velocity="10" />
+  </joint>
+</robot>

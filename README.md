@@ -134,6 +134,54 @@ ros2 launch two_cubes_description display.launch.py
 
 ---
 
+## Examples
+
+Two complete, ready-to-inspect examples ship in [`examples/`](examples/). Each folder
+contains the **source meshes** plus the **fully generated ROS 2 package** (URDF +
+meshes + `package.xml` + `CMakeLists.txt` + launch + rviz), so you can either browse
+the output directly or regenerate it yourself.
+
+| Example | Links | Joints | What it shows |
+|---|---|---|---|
+| [`examples/two_cubes/`](examples/two_cubes/) | 2 | 1 × `fixed` | Smallest end-to-end run: two unit cubes welded together. Matches the Quick Start above. |
+| [`examples/iiwa14/`](examples/iiwa14/) | 8 | 7 × `revolute` | KUKA LBR iiwa14 — a full 7-DOF serial arm with per-link inertia baked from real meshes. |
+
+### `two_cubes` — minimal weld
+
+```bash
+cd examples/two_cubes
+# Source meshes: cube_a.stl, cube_b.stl
+# Pre-generated package: two_cubes_description/
+ros2 launch two_cubes_description/launch/display.launch.py   # view in RViz
+```
+
+To regenerate from scratch, use the `joints.yaml` from the [Quick Start](#quick-start)
+and run `cad2urdf cube_a.stl cube_b.stl --joints joints.yaml -o two_cubes_description --no-validate`.
+
+### `iiwa14` — 7-DOF KUKA arm
+
+The classic LBR iiwa14: a base (`link_0`) and seven revolute joints driving links
+`link_1`–`link_7`. Source meshes live in [`examples/iiwa14/meshes/`](examples/iiwa14/meshes/);
+the generated package is [`examples/iiwa14/iiwa14_description/`](examples/iiwa14/iiwa14_description/).
+
+```mermaid
+graph LR
+    L0[link_0<br/>base] -->|joint_1<br/>revolute| L1[link_1]
+    L1 -->|joint_2<br/>revolute| L2[link_2]
+    L2 -->|joint_3<br/>revolute| L3[link_3]
+    L3 -->|joint_4<br/>revolute| L4[link_4]
+    L4 -->|joint_5<br/>revolute| L5[link_5]
+    L5 -->|joint_6<br/>revolute| L6[link_6]
+    L6 -->|joint_7<br/>revolute| L7[link_7<br/>flange]
+```
+
+```bash
+cd examples/iiwa14
+ros2 launch iiwa14_description/launch/display.launch.py       # view the arm in RViz
+```
+
+---
+
 ## CLI Reference
 
 ```

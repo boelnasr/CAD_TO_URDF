@@ -1,0 +1,54 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="two_cubes">
+  <material name="aluminum_6061">
+    <color rgba="0.85 0.85 0.88 1" />
+  </material>
+  <material name="steel_1018">
+    <color rgba="0.55 0.55 0.58 1" />
+  </material>
+  <link name="cube_a">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="2700" />
+      <inertia ixx="450" ixy="-0" ixz="-0" iyy="450" iyz="-0" izz="450" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://two_cubes_description/meshes/visual/cube_a.stl" />
+      </geometry>
+      <material name="aluminum_6061" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://two_cubes_description/meshes/collision/cube_a.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="cube_b">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="7850" />
+      <inertia ixx="1308.33" ixy="-0" ixz="-0" iyy="1308.33" iyz="-0" izz="1308.33" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://two_cubes_description/meshes/visual/cube_b.stl" />
+      </geometry>
+      <material name="steel_1018" />
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://two_cubes_description/meshes/collision/cube_b.stl" />
+      </geometry>
+    </collision>
+  </link>
+  <joint name="weld" type="fixed">
+    <origin xyz="2 0 0" rpy="0 0 0" />
+    <parent link="cube_a" />
+    <child link="cube_b" />
+  </joint>
+</robot>
