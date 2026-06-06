@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import numpy as np
+
 from cad2urdf.core.kinematic.model import Joint, Link, Robot
 
 
@@ -97,6 +99,48 @@ def reparent_joint(robot: Robot, joint_name: str, new_parent: str) -> Robot:
         velocity=j.velocity,
     )
     return new
+
+
+def set_base_link(robot: Robot, new_base: str) -> Robot:
+    """Re-root the tree at ``new_base`` by reversing joints along the path to the old base.
+
+    Exact for fixed joints; for actuated joints the axis vector is preserved
+    (motion sign may flip). Re-root before assigning joint types/axes.
+    """
+    if new_base not in robot.links:
+        raise ValueError(f"link {new_base!r} not in robot")
+    if new_base == robot.base_link:
+        return deepcopy(robot)
+
+    # Path from new_base up to the current base via parent links.
+    path: list[str] = []
+    cur: str | None = new_base
+    while cur is not None:
+        path.append(cur)
+        cur = parent_of(robot, cur)
+    if path[-1] != robot.base_link:
+        raise ValueError(f"{new_base!r} is not connected to base {robot.base_link!r}")
+
+    work = deepcopy(robot)
+    for i in range(len(path) - 1):
+        child, parent = path[i], path[i + 1]
+        jname = next(
+            jn for jn, j in work.joints.items() if j.parent == parent and j.child == child
+        )
+        j = work.joints[jname]
+        work.joints[jname] = Joint(
+            name=j.name,
+            type=j.type,
+            parent=child,
+            child=parent,
+            axis=j.axis,
+            origin=np.linalg.inv(j.origin),
+            limit_lower=j.limit_lower,
+            limit_upper=j.limit_upper,
+            effort=j.effort,
+            velocity=j.velocity,
+        )
+    return Robot(name=work.name, base_link=new_base, links=work.links, joints=work.joints)
 
 
 def rename_link(robot: Robot, old: str, new: str) -> Robot:
