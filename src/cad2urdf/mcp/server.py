@@ -18,6 +18,8 @@ class Bridge:
     """Owns the GUI subprocess + socket client; lazily spawned on first use."""
 
     def __init__(self) -> None:
+        # mkdtemp creates the parent dir with mode 0o700, so the owner-only
+        # directory is the access control for the unauthenticated control socket.
         self._socket_path = os.path.join(
             tempfile.mkdtemp(prefix="cad2urdf-mcp-"), "control.sock"
         )
@@ -27,15 +29,26 @@ class Bridge:
     def _ensure_started(self) -> None:
         if self._gui is None:
             gui = GuiProcess(socket_path=self._socket_path)
-            gui.start(timeout=30.0)
+            client: ControlClient | None = None
+            try:
+                gui.start(timeout=30.0)
+                client = ControlClient(self._socket_path)
+                client.connect(timeout=10.0)
+            except BaseException:
+                # Partial startup: tear down so the bridge stays in its initial
+                # state and a later call() can retry without leaking the child.
+                if client is not None:
+                    client.close()
+                gui.stop()
+                raise
+            # Commit only after connect() succeeds.
             self._gui = gui
-            self._client = ControlClient(self._socket_path)
-            self._client.connect(timeout=10.0)
+            self._client = client
 
     def call(self, command: str, args: dict[str, Any]) -> Any:
         """Send a command, returning its result or raising on an error envelope."""
         self._ensure_started()
-        if self._client is None:  # pragma: no cover - defensive; partial startup failure
+        if self._client is None:
             raise RuntimeError("Bridge client not connected; startup may have failed")
         resp = self._client.send(command, args)
         if not resp.get("ok"):
@@ -47,11 +60,15 @@ class Bridge:
         return base64.b64decode(result["png_base64"])
 
     def shutdown(self) -> None:
-        if self._client is not None:
-            self._client.close()
-        if self._gui is not None:
-            self._gui.stop()
-        shutil.rmtree(os.path.dirname(self._socket_path), ignore_errors=True)
+        try:
+            if self._client is not None:
+                self._client.close()
+        finally:
+            try:
+                if self._gui is not None:
+                    self._gui.stop()
+            finally:
+                shutil.rmtree(os.path.dirname(self._socket_path), ignore_errors=True)
 
 
 bridge = Bridge()
