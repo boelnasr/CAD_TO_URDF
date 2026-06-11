@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cad2urdf"
-version = "0.1.0a0"
+version = "0.2.0a0"
 description = "Convert CAD assemblies (STEP/STL/OBJ) to ROS-ready URDF packages"
 readme = "README.md"
 requires-python = ">=3.10"

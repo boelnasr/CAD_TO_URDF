@@ -2,7 +2,7 @@
 
 Convert CAD assemblies into ROS 2-ready URDF packages.
 
-[![tests](https://img.shields.io/badge/tests-124%20passed-brightgreen)](#testing) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v0.1.0a0%20alpha-orange)](#status--roadmap)
+[![tests](https://img.shields.io/badge/tests-276%20passed-brightgreen)](#testing) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v0.2.0a0%20alpha-orange)](#status--roadmap)
 
 `cad2urdf` takes mesh files (STL or OBJ today, STEP coming in v1.0) plus a YAML
 joint description and emits a complete ROS 2 ament_cmake package — URDF + meshes
@@ -17,11 +17,12 @@ from each mesh using a user-supplied material density, validated by the user's
 
 | Version | Status | Scope |
 |---|---|---|
-| **v0.1.0a0** (current) | shipping | CLI core: STL/OBJ in, full ROS package out, ManipulaPy validation gate |
+| **v0.2.0a0** (current) | shipping | Everything in v0.1.0a0 **plus** the PyQt6/VTK GUI and an MCP server that drives it end-to-end |
+| v0.1.0a0 | shipped | CLI core: STL/OBJ in, full ROS package out, ManipulaPy validation gate |
 | v1.0 | next | STEP/IGES via conda + pythonOCC-core; full assembly tree + mate extraction |
 | v2.x | planned | LLM natural-language priors ("6-DOF arm with parallel-jaw gripper") |
 | v3.x | planned | ML-based kinematic skeleton extraction (URDFormer-class) from raw meshes |
-| v-future | planned | PyQt6 + VTK GUI; xacro / SDF / MJCF emitters; macOS + Windows packaging |
+| v-future | planned | xacro / SDF / MJCF emitters; macOS + Windows packaging |
 
 The full design lives in [`docs/superpowers/specs/2026-04-26-cad-to-urdf-converter-design.md`](docs/superpowers/specs/2026-04-26-cad-to-urdf-converter-design.md).
 The v1-alpha implementation plan is at [`docs/superpowers/plans/2026-04-26-cad-to-urdf-v1-alpha-cli-core.md`](docs/superpowers/plans/2026-04-26-cad-to-urdf-v1-alpha-cli-core.md).
@@ -30,7 +31,7 @@ The v1-alpha implementation plan is at [`docs/superpowers/plans/2026-04-26-cad-t
 
 ## Install
 
-### Pip-only path (recommended for v0.1.0a0)
+### Pip-only path (recommended for v0.2.0a0)
 
 ```bash
 python3.10 -m venv .venv
@@ -199,7 +200,9 @@ claude mcp add cad2urdf -- cad2urdf-mcp
 ```
 
 The server spawns the GUI on first use over a private Unix-domain socket (no
-network exposure), then proxies high-level commands onto the GUI's main thread:
+network exposure), then proxies high-level commands onto the GUI's main thread.
+The socket lives in an owner-only (`0o700`) temp directory, which is the access
+control for the unauthenticated control channel:
 
 ```mermaid
 flowchart LR
@@ -316,59 +319,27 @@ To use a custom material, add it to `config/materials.json` (the loader caches t
 
 ## Pipeline Architecture
 
-```
-┌──────────────┐     ┌───────────────┐     ┌──────────────┐     ┌──────────────┐
-│ STL/OBJ      │     │ joints.yaml   │     │ materials    │     │  ManipulaPy  │
-│ inputs       │     │ + materials   │     │  (cached)    │     │ (optional)   │
-└──────┬───────┘     └───────┬───────┘     └──────┬───────┘     └──────┬───────┘
-       │                     │                    │                    │
-       ▼                     ▼                    ▼                    │
-┌────────────────────────────────────────────────────┐                 │
-│  core/parsers + core/config.loader                 │                 │
-│  • trimesh.load → Trimesh                          │                 │
-│  • YAML → JointSpec + JointsConfig (schema-checked)│                 │
-└──────────────────────────┬─────────────────────────┘                 │
-                           ▼                                           │
-            ┌──────────────────────────────┐                           │
-            │ core/inertia.compute         │                           │
-            │ mesh + density → mass/com/I  │                           │
-            │ (mesh.copy() — no mutation)  │                           │
-            └──────────────┬───────────────┘                           │
-                           ▼                                           │
-            ┌──────────────────────────────┐                           │
-            │ core/kinematic.model.Robot   │                           │
-            │ Link + Joint + InertialOver- │                           │
-            │ ride dataclasses (frozen-ish)│                           │
-            └──────────────┬───────────────┘                           │
-                           ▼                                           │
-            ┌──────────────────────────────┐                           │
-            │ core/kinematic.validate      │                           │
-            │ cycles, dangling, multi-     │                           │
-            │ parent, missing base         │                           │
-            └──────────────┬───────────────┘                           │
-                           ▼                                           │
-            ┌──────────────────────────────┐                           │
-            │ core/urdf.emit (single pass) │                           │
-            │ Robot AST → URDF 1.0 XML     │                           │
-            │ (deterministic, package://)  │                           │
-            └──────────────┬───────────────┘                           │
-                           ▼                                           │
-            ┌──────────────────────────────┐                           │
-            │ core/urdf.package            │                           │
-            │ ROS scaffolding (pkg.xml,    │                           │
-            │ CMakeLists, launch.py, rviz) │                           │
-            └──────────────┬───────────────┘                           │
-                           ▼                                           │
-            ┌──────────────────────────────┐                           │
-            │ <out_dir>/                   │ ◀─────────────────────────┘
-            │  ├── urdf/<robot>.urdf       │  (optional validation:
-            │  ├── meshes/{visual,         │   parse the URDF back via
-            │  │           collision}/     │   ManipulaPy.URDFToSerial-
-            │  ├── package.xml             │   Manipulator and confirm
-            │  ├── CMakeLists.txt          │   IK + dynamics objects
-            │  ├── launch/                 │   construct cleanly)
-            │  └── rviz/display.rviz       │
-            └──────────────────────────────┘
+```mermaid
+flowchart TD
+    STL["STL/OBJ inputs"]
+    YAML["joints.yaml<br/>+ materials"]
+    MAT["materials<br/>(cached)"]
+    MP["ManipulaPy<br/>(optional)"]
+
+    STL --> PARSE
+    YAML --> PARSE
+    MAT --> INERTIA
+
+    PARSE["core/parsers + core/config.loader<br/>• trimesh.load → Trimesh<br/>• YAML → JointSpec + JointsConfig (schema-checked)"]
+    INERTIA["core/inertia.compute<br/>mesh + density → mass/com/I<br/>(mesh.copy() — no mutation)"]
+    MODEL["core/kinematic.model.Robot<br/>Link + Joint + InertialOverride dataclasses"]
+    VALIDATE["core/kinematic.validate<br/>cycles, dangling, multi-parent, missing base"]
+    EMIT["core/urdf.emit (single pass)<br/>Robot AST → URDF 1.0 XML<br/>(deterministic, package://)"]
+    PKG["core/urdf.package<br/>ROS scaffolding (package.xml,<br/>CMakeLists, launch.py, rviz)"]
+    OUT["&lt;out_dir&gt;/<br/>├── urdf/&lt;robot&gt;.urdf<br/>├── meshes/{visual, collision}/<br/>├── package.xml<br/>├── CMakeLists.txt<br/>├── launch/<br/>└── rviz/display.rviz"]
+
+    PARSE --> INERTIA --> MODEL --> VALIDATE --> EMIT --> PKG --> OUT
+    MP -. "optional validation:<br/>parse URDF back via<br/>ManipulaPy.URDFToSerialManipulator,<br/>confirm IK + dynamics construct" .-> OUT
 ```
 
 **Key invariants:**
