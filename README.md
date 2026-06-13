@@ -2,7 +2,7 @@
 
 Convert CAD assemblies into ROS 2-ready URDF packages.
 
-[![tests](https://img.shields.io/badge/tests-276%20passed-brightgreen)](#testing) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v0.2.0a0%20alpha-orange)](#status--roadmap)
+[![tests](https://img.shields.io/badge/tests-298%20passed-brightgreen)](#testing) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v0.2.0a0%20alpha-orange)](#status--roadmap)
 
 `cad2urdf` takes mesh files (STL or OBJ today, STEP coming in v1.0) plus a YAML
 joint description and emits a complete ROS 2 ament_cmake package — URDF + meshes
@@ -183,6 +183,43 @@ ros2 launch iiwa14_description/launch/display.launch.py       # view the arm in 
 
 ---
 
+## GUI (desktop app)
+
+A PyQt6 + VTK desktop app for authoring robots visually — import meshes, build
+the kinematic tree, edit joints, and export a ROS 2 package, all with a live 3D
+viewport.
+
+```bash
+pip install -e ".[gui]"      # PyQt6 + PyVista/VTK
+cad2urdf-gui
+```
+
+```mermaid
+flowchart LR
+    IMP[Import meshes<br/>STL / OBJ] --> TREE[Build kinematic tree<br/>drag / right-click reparent]
+    TREE --> JOINT[Edit joints<br/>type · axis · limits]
+    JOINT --> EXP[Export ROS 2 package<br/>or save .cad2urdf project]
+```
+
+- **Import** one mesh per moving part (`File → Import Meshes`); the first becomes
+  the base link and the rest are attached, then you reshape the tree.
+- **Link Tree** dock — reparent links (right-click or drag) into a chain.
+- **Joint Editor** dock — set each joint's type, axis, and limits.
+- **3D viewport** — a studio-rendered view that places every link at its
+  forward-kinematic world pose (the assembled robot, matching the exported URDF /
+  RViz), with PBR metallic shading, soft lighting + ground shadow, and a
+  contrasting highlight on the selected link. Click a link to select it.
+- **Export** a full ROS 2 ament package (`Export → Export ROS Package`) or save a
+  `.cad2urdf` project to reopen later.
+
+> **Mesh inputs only.** The GUI imports `.stl` / `.obj` (one file per link).
+> STEP/IGES assemblies are not supported yet — see [Status & Roadmap](#status--roadmap).
+
+Running headless (no display)? See the offscreen env vars under
+[Headless / CI use](#headless--ci-use).
+
+---
+
 ## MCP Server (drive the GUI from Claude)
 
 `cad2urdf` ships an MCP server that **launches the GUI and lets an MCP client
@@ -345,10 +382,122 @@ flowchart TD
 **Key invariants:**
 
 - The `Robot` dataclass is the **single source of truth** between parsing and emission. All transformations operate on it.
-- `core/` has zero `Qt` or `VTK` imports (enforced by file structure; the `gui/` package will be additive in v-future).
+- `core/` has zero `Qt` or `VTK` imports (enforced by file structure; the GUI lives entirely in the separate `gui/` package and builds on `core/`).
 - URDF mesh paths are always `package://<pkg>/<rel>` — absolute paths and `..` segments are rejected at the boundary.
 - `package_name` is validated against ROS naming rules (`^[a-z][a-z0-9_]*$`); `urdf_relpath` components must match `^[a-zA-Z0-9_.-]+$` to prevent template injection into generated launch.py.
 - Maintainer fields are XML-escaped via `xml.sax.saxutils.escape` and `quoteattr`.
+
+---
+
+## Algorithms
+
+The non-trivial steps behind the pipeline, each linked to its source.
+
+### Inertia computation — `core/inertia/compute.py`
+
+Mass, center of mass, and the 3×3 inertia tensor are derived from the mesh and a
+material density. Non-watertight meshes (common in exported CAD) fall back to
+their convex hull; a degenerate hull falls back to zero mass. Any
+`InertialOverride` field the user set wins over the computed value.
+
+```mermaid
+flowchart TD
+    A["mesh + density + override"] --> B{"density positive?"}
+    B -->|no| ERR["raise ValueError"]
+    B -->|yes| C{"mesh watertight?"}
+    C -->|yes| D["mass = density x volume<br/>com, inertia from mesh"]
+    C -->|no| E["log warning<br/>mesh = convex hull"]
+    E --> F{"hull built?"}
+    F -->|yes| D
+    F -->|no| G["zero-mass fallback"]
+    D --> H["merge overrides<br/>(override wins per field)"]
+    G --> H
+    H --> OUT["returns mass, com (3-vector), inertia (3x3)"]
+```
+
+### Forward kinematics — `core/kinematic/tree.py: link_world_transforms`
+
+Each link's world pose is the product of joint origins from the base down the
+tree (`world[child] = world[parent] @ joint.origin`), computed by a breadth-first
+walk from `base_link` (identity). Orphan links default to identity. This is what
+places every mesh in the viewport and the exported URDF.
+
+```mermaid
+flowchart LR
+    BASE["base_link<br/>T = I"] -->|"x J1.origin"| L1["link_1<br/>T = T_base x J1"]
+    L1 -->|"x J2.origin"| L2["link_2<br/>T = T_1 x J2"]
+    L2 -->|"x J3.origin"| L3["link_3<br/>T = T_2 x J3"]
+```
+
+### Tree re-rooting — `core/kinematic/tree.py: set_base_link`
+
+To re-root the tree at a new base, the joints on the path from the new base up to
+the old base are reversed: parent and child swap and the 4×4 origin is inverted.
+All other joints are untouched.
+
+```mermaid
+flowchart LR
+    subgraph Before["before (base = A)"]
+        A1["A"] --> B1["B"] --> C1["C"]
+    end
+    subgraph After["after (base = C)"]
+        C2["C"] --> B2["B"] --> A2["A"]
+    end
+    Before -->|"reverse joints on path C..A<br/>origin becomes inv(origin)"| After
+```
+
+### Spanning-tree extraction — `core/extract/spanning_tree.py`
+
+A CAD assembly is a graph that may contain loops. A breadth-first walk from the
+base keeps the first edge that reaches each new node and drops loop-closing
+edges. An edge traversed "backwards" is re-directed away from the base — its
+relative pose is inverted and its axis negated. Nodes unreachable from the base
+raise `SpanningTreeError`. (Feeds the v1.0 STEP-assembly path.)
+
+```mermaid
+flowchart LR
+    subgraph G["assembly graph (undirected, may loop)"]
+        a["base"] --- b["b"]
+        b --- c["c"]
+        c --- a
+        b --- d["d"]
+    end
+    subgraph T["spanning tree (BFS from base)"]
+        a2["base"] --> b2["b"]
+        a2 --> c2["c"]
+        b2 --> d2["d"]
+    end
+    G -->|"first edge to a new node wins;<br/>loop edge c-a dropped;<br/>flipped edge: pose inverted, axis negated"| T
+```
+
+### Kinematic validation — `core/kinematic/validate.py`
+
+A Robot AST is checked by four independent passes; the result is a flat list of
+issues (empty means valid).
+
+```mermaid
+flowchart TD
+    R["Robot AST"] --> C1["missing_base<br/>base_link is a known link?"]
+    R --> C2["dangling_link<br/>DFS reachability from base"]
+    R --> C3["multi_parent<br/>any child with two+ parents?"]
+    R --> C4["cycle<br/>walk parent-of upward; revisit = cycle"]
+    C1 --> OUT["list of ValidationIssue<br/>(empty = valid)"]
+    C2 --> OUT
+    C3 --> OUT
+    C4 --> OUT
+```
+
+### Origin transform conversion — `core/config/loader.py` & `core/urdf/emit.py`
+
+URDF expresses joint placement as `xyz` + fixed-axis roll-pitch-yaw; internally a
+joint carries a 4×4 homogeneous transform. The two conversions round-trip; the
+decomposition handles the gimbal-lock case where `cos(pitch) ≈ 0`.
+
+```mermaid
+flowchart LR
+    XYZ["xyz, rpy = (r, p, y)"] -->|"R = Rz(y) . Ry(p) . Rx(r)<br/>T = R with translation xyz"| M["4x4 transform"]
+    M -->|"pitch = asin(-R(2,0))<br/>normal: roll=atan2(R(2,1),R(2,2)), yaw=atan2(R(1,0),R(0,0))<br/>gimbal lock: roll=atan2(-R(1,2),R(1,1)), yaw=0"| XYZ2["xyz, rpy"]
+```
 
 ---
 
