@@ -53,6 +53,37 @@ def test_viewport_rebuilds_on_robotChanged(qtbot, base_stl, arm_stl) -> None:
     assert set(vp.actors_by_link_name()) == {"base"}
 
 
+def test_viewport_places_links_via_forward_kinematics(qtbot, base_stl, arm_stl) -> None:
+    from cad2urdf.core.kinematic.model import Joint
+    from cad2urdf.gui.state.controller import RobotController
+    from cad2urdf.gui.viewport.widget import ViewportWidget
+
+    # base at origin; arm attached by a fixed joint offset +5.0 in z.
+    origin = np.eye(4)
+    origin[2, 3] = 5.0
+    links = {
+        "base": _link_with_mesh("base", base_stl),
+        "arm": _link_with_mesh("arm", arm_stl),
+    }
+    joint = Joint(
+        name="j",
+        type="fixed",
+        parent="base",
+        child="arm",
+        axis=np.array([1.0, 0.0, 0.0]),
+        origin=origin,
+    )
+    c = RobotController()
+    c.replace(Robot(name="r", base_link="base", links=links, joints={"j": joint}))
+    vp = ViewportWidget(c)
+    qtbot.addWidget(vp)
+
+    # The arm's unit-cube actor must be lifted to ~z=5 by FK, not left at origin.
+    arm_bounds = vp.actors_by_link_name()["arm"].bounds
+    arm_center_z = (arm_bounds[4] + arm_bounds[5]) / 2.0
+    assert 4.0 < arm_center_z < 6.0
+
+
 def test_viewport_skips_links_with_non_absolute_paths(qtbot) -> None:
     from cad2urdf.gui.state.controller import RobotController
     from cad2urdf.gui.state.empty_robot import make_empty_robot

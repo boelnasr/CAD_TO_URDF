@@ -27,6 +27,7 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from cad2urdf.core.kinematic.model import Robot
+from cad2urdf.core.kinematic.tree import link_world_transforms
 from cad2urdf.gui.state.controller import RobotController
 
 
@@ -91,6 +92,11 @@ class ViewportWidget(QWidget):
             self.plotter.remove_actor(actor)
         self._actors.clear()
 
+        # Forward kinematics: place each link's mesh at its world pose, matching
+        # the exported URDF / RViz. Without this every mesh renders at its own
+        # local origin and the links pile up on top of each other.
+        transforms = link_world_transforms(robot)
+
         for name, link in robot.links.items():
             path = link.visual_mesh_path
             if not path.is_absolute() or not path.is_file():
@@ -99,6 +105,9 @@ class ViewportWidget(QWidget):
                 mesh = pv.read(str(path))
             except Exception:
                 continue
+            transform = transforms.get(name)
+            if transform is not None:
+                mesh = mesh.transform(transform, inplace=False)
             actor = self.plotter.add_mesh(
                 mesh, name=name, show_edges=False, color="lightgray", pickable=True
             )
