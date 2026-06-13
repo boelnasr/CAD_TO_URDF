@@ -94,3 +94,142 @@ def test_viewport_skips_links_with_non_absolute_paths(qtbot) -> None:
     vp = ViewportWidget(c)
     qtbot.addWidget(vp)
     assert vp.actors_by_link_name() == {}
+
+
+def _color(actor):
+    """Actor base colour as a pyvista ``Color`` (8-bit-quantised, comparable)."""
+    import pyvista as pv
+
+    return pv.Color(actor.prop.color)
+
+
+def _expected(rgb):
+    """Quantise an expected float RGB the same way VTK stores actor colours."""
+    import pyvista as pv
+
+    return pv.Color(rgb)
+
+
+def test_highlight_link_changes_selected_actor_appearance(qtbot, base_stl, arm_stl) -> None:
+    from cad2urdf.gui.state.controller import RobotController
+    from cad2urdf.gui.viewport.style import ViewportStyle
+    from cad2urdf.gui.viewport.widget import ViewportWidget
+
+    c = RobotController()
+    c.replace(_robot([("base", base_stl), ("arm", arm_stl)]))
+    vp = ViewportWidget(c)
+    qtbot.addWidget(vp)
+    actors = vp.actors_by_link_name()
+
+    # Before any selection both links look identical (normal metal).
+    assert _color(actors["arm"]) == _color(actors["base"])
+
+    vp.highlight_link("arm")
+
+    # The selected link now differs from a normal (unselected) link...
+    assert _color(actors["arm"]) != _color(actors["base"])
+    # ...and matches the highlight style, while the other link stays normal.
+    assert _color(actors["arm"]) == _expected(ViewportStyle.highlight_kwargs()["color"])
+    assert _color(actors["base"]) == _expected(ViewportStyle.mesh_kwargs()["color"])
+
+
+def test_highlight_link_restores_on_deselect(qtbot, base_stl, arm_stl) -> None:
+    from cad2urdf.gui.state.controller import RobotController
+    from cad2urdf.gui.viewport.style import ViewportStyle
+    from cad2urdf.gui.viewport.widget import ViewportWidget
+
+    c = RobotController()
+    c.replace(_robot([("base", base_stl), ("arm", arm_stl)]))
+    vp = ViewportWidget(c)
+    qtbot.addWidget(vp)
+    actors = vp.actors_by_link_name()
+
+    vp.highlight_link("arm")
+    assert _color(actors["arm"]) == _expected(ViewportStyle.highlight_kwargs()["color"])
+
+    vp.highlight_link(None)  # clear selection
+    assert _color(actors["arm"]) == _expected(ViewportStyle.mesh_kwargs()["color"])
+
+
+def test_highlight_link_moves_highlight_to_other_link(qtbot, base_stl, arm_stl) -> None:
+    from cad2urdf.gui.state.controller import RobotController
+    from cad2urdf.gui.viewport.style import ViewportStyle
+    from cad2urdf.gui.viewport.widget import ViewportWidget
+
+    c = RobotController()
+    c.replace(_robot([("base", base_stl), ("arm", arm_stl)]))
+    vp = ViewportWidget(c)
+    qtbot.addWidget(vp)
+    actors = vp.actors_by_link_name()
+
+    vp.highlight_link("arm")
+    vp.highlight_link("base")  # select a different link
+
+    # The previously selected link is restored, the new one is highlighted.
+    assert _color(actors["arm"]) == _expected(ViewportStyle.mesh_kwargs()["color"])
+    assert _color(actors["base"]) == _expected(ViewportStyle.highlight_kwargs()["color"])
+
+
+def test_highlight_link_noop_for_unknown_and_none(qtbot, base_stl, arm_stl) -> None:
+    from cad2urdf.gui.state.controller import RobotController
+    from cad2urdf.gui.viewport.style import ViewportStyle
+    from cad2urdf.gui.viewport.widget import ViewportWidget
+
+    c = RobotController()
+    c.replace(_robot([("base", base_stl), ("arm", arm_stl)]))
+    vp = ViewportWidget(c)
+    qtbot.addWidget(vp)
+    actors = vp.actors_by_link_name()
+
+    # Establish a real selection first, then an unknown name must NOT disturb it
+    # (the dangerous regression: an unknown link clearing/moving the highlight).
+    vp.highlight_link("arm")
+    vp.highlight_link("does_not_exist")
+    assert _color(actors["arm"]) == _expected(ViewportStyle.highlight_kwargs()["color"])
+    assert _color(actors["base"]) == _expected(ViewportStyle.mesh_kwargs()["color"])
+
+    # None clears the selection without raising.
+    vp.highlight_link(None)
+    assert _color(actors["arm"]) == _expected(ViewportStyle.mesh_kwargs()["color"])
+
+
+def test_highlight_survives_rebuild(qtbot, base_stl, arm_stl) -> None:
+    from cad2urdf.gui.state.controller import RobotController
+    from cad2urdf.gui.viewport.style import ViewportStyle
+    from cad2urdf.gui.viewport.widget import ViewportWidget
+
+    c = RobotController()
+    c.replace(_robot([("base", base_stl), ("arm", arm_stl)]))
+    vp = ViewportWidget(c)
+    qtbot.addWidget(vp)
+
+    vp.highlight_link("arm")
+    # Force a rebuild (e.g. an edit fired robotChanged). New actor objects are
+    # created; the highlight must be re-applied to the still-selected link.
+    c.replace(_robot([("base", base_stl), ("arm", arm_stl)]))
+    actors = vp.actors_by_link_name()
+    assert _color(actors["arm"]) == _expected(ViewportStyle.highlight_kwargs()["color"])
+    assert _color(actors["base"]) == _expected(ViewportStyle.mesh_kwargs()["color"])
+
+
+def test_widget_uses_fallback_metal_when_env_map_fails(
+    qtbot, base_stl, arm_stl, monkeypatch
+) -> None:
+    from cad2urdf.gui.state.controller import RobotController
+    from cad2urdf.gui.viewport.style import ViewportStyle
+    from cad2urdf.gui.viewport.widget import ViewportWidget
+
+    # Force the environment map to fail during widget construction; the widget
+    # must then render links with the no-envmap fallback metal (lighter, rougher)
+    # rather than the reflective default that would read flat without reflections.
+    def _boom() -> object:
+        raise RuntimeError("no env map")
+
+    monkeypatch.setattr(ViewportStyle, "make_environment_texture", staticmethod(_boom))
+
+    c = RobotController()
+    c.replace(_robot([("base", base_stl), ("arm", arm_stl)]))
+    vp = ViewportWidget(c)
+    qtbot.addWidget(vp)
+    actors = vp.actors_by_link_name()
+    assert _color(actors["base"]) == _expected(ViewportStyle.mesh_kwargs_no_envmap()["color"])

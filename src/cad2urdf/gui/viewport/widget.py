@@ -20,6 +20,7 @@ which is fine — tests only call ``actors_by_link_name()`` and never paint.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import pyvista as pv
@@ -29,6 +30,7 @@ from PyQt6.QtWidgets import QVBoxLayout, QWidget
 from cad2urdf.core.kinematic.model import Robot
 from cad2urdf.core.kinematic.tree import link_world_transforms
 from cad2urdf.gui.state.controller import RobotController
+from cad2urdf.gui.viewport.style import ViewportStyle
 
 
 class ViewportWidget(QWidget):
@@ -40,6 +42,7 @@ class ViewportWidget(QWidget):
         super().__init__(parent)
         self._controller = controller
         self._actors: dict[str, Any] = {}
+        self._selected: str | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -55,16 +58,20 @@ class ViewportWidget(QWidget):
 
             self.plotter = QtInteractor(self)
             layout.addWidget(self.plotter.interactor)
-            self.plotter.set_background("white")
-            self.plotter.show_axes()
-            self.plotter.show_grid()
+
+        # Studio look (background gradient, lights, env map, floor, AA/SSAO).
+        # Heavy GPU passes are gated on a real display inside apply_scene.
+        # The return flag says whether the env map landed; without it PBR metal
+        # reads flat, so links fall back to a lighter, rougher metal.
+        self._env_ok = ViewportStyle.apply_scene(self.plotter, offscreen=pv.OFF_SCREEN)
+        # Keep a small orientation axes widget regardless of platform.
+        with contextlib.suppress(Exception):
+            self.plotter.add_axes()
 
         controller.robotChanged.connect(self._rebuild)
         self._rebuild(controller.current())
 
         # Mesh picking. pyvistaqt routes left-clicks on actors through this callback.
-        import contextlib
-
         with contextlib.suppress(Exception):
             self.plotter.enable_mesh_picking(
                 callback=self.handle_pick, show=False, show_message=False
@@ -84,7 +91,48 @@ class ViewportWidget(QWidget):
         if name is not None:
             self.linkPicked.emit(name)
 
+    def highlight_link(self, name: str | None) -> None:
+        """Highlight ``name`` (restyling the previous selection back to normal).
+
+        A no-op for ``None`` and for unknown link names / links without an actor
+        (e.g. placeholder links whose mesh path is not absolute). The currently
+        selected link is tracked in ``self._selected`` so a rebuild can restore
+        the highlight on the freshly created actor.
+        """
+        # Unknown link with no actor: leave the current selection untouched.
+        if name is not None and name not in self._actors:
+            return
+
+        # Restore the previously highlighted actor (if it still exists).
+        if self._selected is not None and self._selected != name:
+            self._apply_style(self._actors.get(self._selected), self._normal_kwargs())
+
+        if name is None:
+            self._selected = None
+            return
+
+        self._apply_style(self._actors[name], ViewportStyle.highlight_kwargs())
+        self._selected = name
+
     # ---- private -----------------------------------------------------------
+
+    def _normal_kwargs(self) -> dict[str, Any]:
+        """Styling for an unselected link: reflective metal when the environment
+        map applied, the lighter/rougher fallback metal otherwise."""
+        return ViewportStyle.mesh_kwargs() if self._env_ok else ViewportStyle.mesh_kwargs_no_envmap()
+
+    @staticmethod
+    def _apply_style(actor: Any, kwargs: dict[str, Any]) -> None:
+        """Apply ``add_mesh`` styling kwargs to an existing actor's property."""
+        if actor is None:
+            return
+        prop = actor.prop
+        with contextlib.suppress(Exception):
+            prop.color = kwargs["color"]
+        with contextlib.suppress(Exception):
+            prop.metallic = kwargs["metallic"]
+        with contextlib.suppress(Exception):
+            prop.roughness = kwargs["roughness"]
 
     def _rebuild(self, robot: Robot) -> None:
         """Replace all actors to match the current robot link set."""
@@ -109,8 +157,16 @@ class ViewportWidget(QWidget):
             if transform is not None:
                 mesh = mesh.transform(transform, inplace=False)
             actor = self.plotter.add_mesh(
-                mesh, name=name, show_edges=False, color="lightgray", pickable=True
+                mesh, name=name, pickable=True, **self._normal_kwargs()
             )
             self._actors[name] = actor
 
         self.plotter.reset_camera()
+
+        # Re-apply the highlight to the still-selected link on the new actor.
+        if self._selected is not None:
+            actor = self._actors.get(self._selected)
+            if actor is None:
+                self._selected = None
+            else:
+                self._apply_style(actor, ViewportStyle.highlight_kwargs())

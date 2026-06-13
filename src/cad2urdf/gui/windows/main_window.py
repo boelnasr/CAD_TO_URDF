@@ -61,6 +61,10 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_inertia_editor)
         self.dock_link_tree.linkSelected.connect(self.dock_inertia_editor.show_link)
 
+        # Tree selection → highlight the link in the viewport. Viewport picking
+        # loops back through the tree, so both paths drive the highlight.
+        self.dock_link_tree.linkSelected.connect(self.viewport.highlight_link)
+
         # Viewport pick → select that link in the tree (which cascades to the
         # joint + inertia editors via the existing linkSelected connections).
         self.viewport.linkPicked.connect(self._select_link_in_tree)
