@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from cad2urdf.core.kinematic.model import Joint, Link, Robot
 
@@ -21,6 +23,33 @@ def parent_of(robot: Robot, link_name: str) -> str | None:
         if j.child == link_name:
             return j.parent
     return None
+
+
+def link_world_transforms(robot: Robot) -> dict[str, NDArray[Any]]:
+    """World-frame 4x4 transform of every link via forward kinematics from base.
+
+    Walks the tree from ``base_link`` (identity), composing each joint's origin
+    (parent -> child): ``world[child] = world[parent] @ joint.origin``. This
+    mirrors URDF/RViz placement — the emitter writes a zero visual origin, so a
+    link's mesh sits directly at its link frame. Links not reachable from
+    ``base_link`` (orphans) default to identity.
+    """
+    world: dict[str, NDArray[Any]] = {robot.base_link: np.eye(4)}
+    stack = [robot.base_link]
+    while stack:
+        parent = stack.pop()
+        for child in children_of(robot, parent):
+            if child in world:
+                continue
+            joint = next(
+                j for j in robot.joints.values() if j.parent == parent and j.child == child
+            )
+            world[child] = world[parent] @ joint.origin
+            stack.append(child)
+    for name in robot.links:
+        if name not in world:
+            world[name] = np.eye(4)
+    return world
 
 
 def descendants_of(robot: Robot, link_name: str) -> set[str]:
