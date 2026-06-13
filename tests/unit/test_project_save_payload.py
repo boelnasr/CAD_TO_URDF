@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from cad2urdf.core.kinematic.model import InertialOverride, Joint, Link, Robot
+from cad2urdf.core.kinematic.model import InertialOverride, Link, Robot
 from cad2urdf.core.project.save import SCHEMA_VERSION, robot_to_payload
 
 
