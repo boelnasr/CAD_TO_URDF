@@ -46,7 +46,9 @@ def test_import_rejects_unsupported_extension(qtbot, tmp_path: Path) -> None:
     assert ".xyz" in err or "unsupported" in err.lower()
 
 
-def test_import_step_path_emits_helpful_error(qtbot, tmp_path: Path) -> None:
+def test_mesh_import_rejects_step_extension(qtbot, tmp_path: Path) -> None:
+    # STEP now has its own import path (build_step_import_job); the mesh importer
+    # no longer special-cases it and treats .step as an unsupported extension.
     from cad2urdf.gui.workers.base import Worker
     from cad2urdf.gui.workers.import_meshes import build_import_job
 
@@ -57,4 +59,4 @@ def test_import_step_path_emits_helpful_error(qtbot, tmp_path: Path) -> None:
     with qtbot.waitSignal(w.failed, timeout=5000) as blocker:
         w.start()
     err, _ = blocker.args
-    assert "pythonOCC" in err or "STEP" in err
+    assert ".step" in err or "unsupported" in err.lower()

@@ -23,22 +23,14 @@ from cad2urdf.core.kinematic.model import (
 from cad2urdf.core.parsers.obj import load_obj
 from cad2urdf.core.parsers.stl import load_stl
 
-STEP_NOT_SUPPORTED = (
-    "STEP / IGES inputs require pythonOCC-core (conda-only). "
-    "Install via `conda env create -f environment.yml` and rerun. "
-    "v1 GUI supports STL/OBJ only."
-)
-
-
 def _load_one(path: Path) -> tuple[str, Path]:
     """Validate and load a single mesh. Returns (link_name, absolute_path).
 
-    Raises ValueError on unsupported extensions (including STEP/IGES) and
-    FileNotFoundError on missing files.
+    Raises ValueError on unsupported extensions and FileNotFoundError on missing
+    files. STEP assemblies have their own import path (see
+    ``cad2urdf.gui.workers.step_import``).
     """
     suffix = path.suffix.lower()
-    if suffix in {".step", ".stp", ".iges", ".igs"}:
-        raise ValueError(STEP_NOT_SUPPORTED)
     if suffix == ".stl":
         load_stl(path)
     elif suffix == ".obj":
