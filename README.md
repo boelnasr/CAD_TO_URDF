@@ -2,7 +2,7 @@
 
 Convert CAD assemblies into ROS 2-ready URDF packages.
 
-[![tests](https://img.shields.io/badge/tests-311%20passed-brightgreen)](#testing) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v0.2.0a0%20alpha-orange)](#status--roadmap)
+[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-312%20passed-brightgreen)](#testing) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v0.2.0a0%20alpha-orange)](#status--roadmap)
 
 `cad2urdf` takes mesh files (STL or OBJ) or a STEP assembly (`.stp`/`.step`, via
 the `[step]` extra) plus a YAML joint description â€” or, for STEP, the assembly's
@@ -541,7 +541,7 @@ Schema migrations live in a `_MIGRATIONS: dict[(int,int), Callable]` registry â€
 
 ```bash
 unset PYTHONPATH AMENT_PREFIX_PATH    # strip ROS leakage
-pytest                                # 311 unit + integration + gui tests
+pytest                                # 312 unit + integration + gui tests
 pytest -m slow                        # ManipulaPy validation tests (need [urdf-io])
 ```
 
@@ -552,6 +552,14 @@ mypy                                  # strict mode on src/cad2urdf/core/
 ```
 
 The type checker is clean on every committed revision; CI enforces this gate.
+
+### Continuous integration
+
+[GitHub Actions](.github/workflows/ci.yml) runs on every push to `main` and every
+pull request: **ruff** (lint), **mypy** (strict), and the **full pytest suite**
+(unit + integration + GUI). The job installs the `[dev,gui,step,mcp]` extras so
+the STEP (OCP) and Qt/VTK paths are exercised, and runs the GUI/STEP tests
+headless under `xvfb` with `QT_QPA_PLATFORM=offscreen` + `PYVISTA_OFF_SCREEN=true`.
 
 ### Project layout
 
