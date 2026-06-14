@@ -24,6 +24,13 @@ dependencies = [
 urdf-io = [
     "manipulapy>=1.3.1",
 ]
+# STEP/.stp import via OCP (cadquery-ocp — the pip-installable OCCT binding).
+# Heavy wheel. core/parsers/step.py lazy-imports OCP inside function bodies so the
+# default install stays small and importing the package without OCP never crashes.
+# Install as: pip install -e ".[step]" (or use the conda pythonocc-core path).
+step = [
+    "cadquery-ocp>=7.7",
+]
 gui = [
     "PyQt6>=6.6",
     "pyvistaqt>=0.11",
@@ -66,7 +73,7 @@ strict = true
 files = ["src/cad2urdf/core", "src/cad2urdf/gui", "src/cad2urdf/mcp"]
 
 [[tool.mypy.overrides]]
-module = ["trimesh.*", "OCC.*", "ManipulaPy.*", "pyvistaqt.*", "pyvista.*", "vtk.*"]
+module = ["trimesh.*", "OCC.*", "OCP.*", "ManipulaPy.*", "pyvistaqt.*", "pyvista.*", "vtk.*"]
 ignore_missing_imports = true
 
 # gui code uses Qt subclassing patterns that don't play well with --strict;

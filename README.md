@@ -2,10 +2,11 @@
 
 Convert CAD assemblies into ROS 2-ready URDF packages.
 
-[![tests](https://img.shields.io/badge/tests-298%20passed-brightgreen)](#testing) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v0.2.0a0%20alpha-orange)](#status--roadmap)
+[![tests](https://img.shields.io/badge/tests-311%20passed-brightgreen)](#testing) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v0.2.0a0%20alpha-orange)](#status--roadmap)
 
-`cad2urdf` takes mesh files (STL or OBJ today, STEP coming in v1.0) plus a YAML
-joint description and emits a complete ROS 2 ament_cmake package — URDF + meshes
+`cad2urdf` takes mesh files (STL or OBJ) or a STEP assembly (`.stp`/`.step`, via
+the `[step]` extra) plus a YAML joint description — or, for STEP, the assembly's
+own named parts and poses — and emits a complete ROS 2 ament_cmake package — URDF + meshes
 + `package.xml` + `CMakeLists.txt` + `launch/display.launch.py` + `rviz/display.rviz`
 — ready to drop into a workspace and view in RViz. Inertia is auto-computed
 from each mesh using a user-supplied material density, validated by the user's
@@ -17,9 +18,9 @@ from each mesh using a user-supplied material density, validated by the user's
 
 | Version | Status | Scope |
 |---|---|---|
-| **v0.2.0a0** (current) | shipping | Everything in v0.1.0a0 **plus** the PyQt6/VTK GUI and an MCP server that drives it end-to-end |
+| **v0.2.0a0** (current) | shipping | Everything in v0.1.0a0 **plus** the PyQt6/VTK GUI, an MCP server that drives it end-to-end, and **STEP assembly import** (`.stp`/`.step` via the `[step]` extra — each part becomes a link, joined by fixed joints you re-type in the editor) |
 | v0.1.0a0 | shipped | CLI core: STL/OBJ in, full ROS package out, ManipulaPy validation gate |
-| v1.0 | next | STEP/IGES via conda + pythonOCC-core; full assembly tree + mate extraction |
+| v1.0 | next | IGES support; richer assembly mate extraction (auto-classify revolute/prismatic) |
 | v2.x | planned | LLM natural-language priors ("6-DOF arm with parallel-jaw gripper") |
 | v3.x | planned | ML-based kinematic skeleton extraction (URDFormer-class) from raw meshes |
 | v-future | planned | xacro / SDF / MJCF emitters; macOS + Windows packaging |
@@ -40,21 +41,31 @@ pip install -e ".[dev]"
 ```
 
 Targets Python 3.10+ (matches Ubuntu 22.04 / ROS 2 Humble baseline). STL and OBJ
-mesh inputs are fully supported. The CLI rejects `.step` / `.stp` inputs with a
-clear error pointing back at this README — STEP support requires conda (see below)
-and is wired in v1.0, not v1-alpha.
+mesh inputs are fully supported out of the box.
 
-### Conda path (scaffolded for v1.0 STEP support)
+### STEP import extra
+
+```bash
+pip install -e ".[step]"
+```
+
+Adds [`cadquery-ocp`](https://pypi.org/project/cadquery-ocp/) — the
+pip-installable OCCT (OpenCASCADE) binding — enabling `.stp` / `.step` assembly
+import in both the CLI and the GUI. Each named part in the assembly becomes a
+link (with its tessellated mesh and pose); sub-assembly nodes become meshless
+"frame" links; parts are joined by `fixed` joints you can re-type in the editor.
+OCP is lazy-imported, so the core package still installs and runs without it.
+
+### Conda path (alternative OCCT binding)
 
 ```bash
 conda env create -f environment.yml
 conda activate cad2urdf
 ```
 
-`pythonOCC-core` is not on PyPI; it's only distributed via conda-forge. The
-`environment.yml` installs it alongside the pip extras so the runtime is ready
-when v1.0 STEP-parsing code lands. Until then the conda env is functionally
-equivalent to the pip-only path.
+`pythonOCC-core` is the conda-forge OCCT binding (not on PyPI). The code targets
+the OCP API that both `cadquery-ocp` (pip) and `pythonocc-core` (conda) expose,
+so either install path enables STEP import.
 
 ### ManipulaPy validation extra
 
@@ -196,7 +207,7 @@ cad2urdf-gui
 
 ```mermaid
 flowchart LR
-    IMP[Import meshes<br/>STL / OBJ] --> TREE[Build kinematic tree<br/>drag / right-click reparent]
+    IMP[Import meshes<br/>STL / OBJ / STEP] --> TREE[Build kinematic tree<br/>drag / right-click reparent]
     TREE --> JOINT[Edit joints<br/>type · axis · limits]
     JOINT --> EXP[Export ROS 2 package<br/>or save .cad2urdf project]
 ```
@@ -212,8 +223,13 @@ flowchart LR
 - **Export** a full ROS 2 ament package (`Export → Export ROS Package`) or save a
   `.cad2urdf` project to reopen later.
 
-> **Mesh inputs only.** The GUI imports `.stl` / `.obj` (one file per link).
-> STEP/IGES assemblies are not supported yet — see [Status & Roadmap](#status--roadmap).
+- **Import STEP** (`File → Import STEP`, needs the `[step]` extra) — load a full
+  `.stp` / `.step` assembly in one step: each named part becomes a link with its
+  mesh and pose, joined by fixed joints you can re-type in the Joint Editor.
+
+> **Inputs.** The GUI imports `.stl` / `.obj` meshes (one file per link) and, with
+> the `[step]` extra installed, full STEP assemblies. IGES is not supported yet —
+> see [Status & Roadmap](#status--roadmap).
 
 Running headless (no display)? See the offscreen env vars under
 [Headless / CI use](#headless--ci-use).
@@ -287,7 +303,7 @@ cad2urdf <inputs>... --joints CONFIG.yaml -o OUT_DIR [options]
 
 | Flag | Purpose |
 |---|---|
-| `<inputs>...` | One or more STL or OBJ files. Each file's stem becomes a link name. STEP inputs are rejected with a v1.0 message. |
+| `<inputs>...` | One or more STL or OBJ files (each file's stem becomes a link name), **or** a single `.stp` / `.step` assembly (parts/poses read directly; needs the `[step]` extra). |
 | `-o, --out PATH` | Output directory. Will be created if missing. If pre-existing, **never** deleted on rollback (we only clean dirs we created). |
 | `--joints PATH` | YAML config defining joint topology, axes, limits, and per-link materials (see schema below). |
 | `--robot-name NAME` | Override `robot_name` from the joints YAML. |
@@ -525,7 +541,7 @@ Schema migrations live in a `_MIGRATIONS: dict[(int,int), Callable]` registry �
 
 ```bash
 unset PYTHONPATH AMENT_PREFIX_PATH    # strip ROS leakage
-pytest                                # 124 unit + integration tests
+pytest                                # 311 unit + integration + gui tests
 pytest -m slow                        # ManipulaPy validation tests (need [urdf-io])
 ```
 
@@ -544,18 +560,19 @@ cad2urdf/
 ├── src/cad2urdf/
 │   ├── core/                         # zero Qt/VTK imports — drives the CLI
 │   │   ├── kinematic/                # Robot/Link/Joint/InertialOverride + tree + validate
-│   │   ├── parsers/                  # stl, obj (step coming in v1.0)
-│   │   ├── extract/                  # types.AssemblyEdge, mate_classify, spanning_tree
+│   │   ├── parsers/                  # stl, obj, step (OCP/XCAF assembly walk)
+│   │   ├── extract/                  # types.AssemblyEdge, mate_classify, spanning_tree, build_robot
 │   │   ├── inertia/                  # materials table, mass/COM/inertia compute
-│   │   ├── meshing/                  # OCC tessellation hook (v1.0)
+│   │   ├── meshing/                  # OCC tessellation hook
 │   │   ├── urdf/                     # emit (URDF 1.0 XML), package (ROS scaffolding)
 │   │   ├── validation/               # manipulapy_gate (lazy-import)
 │   │   ├── project/                  # save/load .cad2urdf JSON
 │   │   └── config/                   # loader (joints YAML schema)
 │   └── cli/main.py                   # argparse + 7-phase pipeline orchestrator
 ├── tests/
-│   ├── unit/                         # 110 tests, one file per core module
-│   └── integration/                  # 4 tests, end-to-end CLI runs
+│   ├── unit/                         # one file per core module
+│   ├── integration/                  # end-to-end CLI + STEP pipeline runs
+│   └── gui/                          # Qt + viewport (offscreen)
 ├── config/materials.json             # default density table
 ├── docs/superpowers/                 # specs/ + plans/ — design source of truth
 ├── pyproject.toml                    # Python 3.10+, manipulapy in [urdf-io] extra
@@ -595,6 +612,7 @@ MIT. See `pyproject.toml`.
 ## Acknowledgements
 
 Built on top of [trimesh](https://github.com/mikedh/trimesh),
-[pythonOCC-core](https://github.com/tpaviot/pythonocc-core) (v1.0+),
+[cadquery-ocp](https://pypi.org/project/cadquery-ocp/) /
+[pythonOCC-core](https://github.com/tpaviot/pythonocc-core) (STEP import),
 [ManipulaPy](https://github.com/boelnasr/ManipulaPy), and the
 [ROS 2](https://docs.ros.org/) ecosystem.

@@ -1,6 +1,10 @@
 name: cad2urdf
 channels:
   - conda-forge
+# STEP (.stp/.step) assembly import needs an OCCT Python binding. Two paths work:
+#   - conda: pythonocc-core (below), or
+#   - pip:   the [step] extra (cadquery-ocp), e.g. pip install -e ".[step]".
+# The code targets the OCP API (cadquery-ocp), which pythonocc-core also provides.
 dependencies:
   - python=3.10
   - pythonocc-core>=7.7
