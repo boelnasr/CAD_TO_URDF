@@ -1,7 +1,8 @@
 """cad2urdf CLI: input meshes + joint config → ROS 2 URDF package.
 
-v1-alpha: STL/OBJ inputs only. STEP support requires conda + pythonOCC-core
-(see README's Option A install path).
+STL/OBJ inputs (one mesh per link, joints from YAML) or a single STEP (.step/.stp)
+assembly (each part becomes a link, joined by fixed joints — needs the ``[step]``
+extra, i.e. ``pip install -e '.[step]'``).
 """
 
 from __future__ import annotations
@@ -36,10 +37,12 @@ from cad2urdf.core.validation.manipulapy_gate import validate_urdf
 
 log = logging.getLogger("cad2urdf")
 
-STEP_NOT_SUPPORTED_MSG = (
-    "STEP / IGES inputs require pythonOCC-core (conda-only). "
-    "Install via `conda env create -f environment.yml` and rerun. "
-    "v1-alpha pip-install path supports STL/OBJ only."
+STEP_MULTI_INPUT_MSG = (
+    "STEP/.stp assemblies must be passed as a single input file (the whole "
+    "assembly becomes one Robot); do not mix STEP with other meshes."
+)
+IGES_NOT_SUPPORTED_MSG = (
+    "IGES inputs are not supported. Use a STEP (.step/.stp) assembly or STL/OBJ meshes."
 )
 
 
@@ -47,9 +50,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="cad2urdf", description="Convert CAD assemblies to ROS 2 URDF packages."
     )
-    p.add_argument("inputs", nargs="+", type=Path, help="Input STL/OBJ files (one per link).")
+    p.add_argument(
+        "inputs",
+        nargs="+",
+        type=Path,
+        help="Input STL/OBJ files (one per link), or a single STEP (.step/.stp) assembly.",
+    )
     p.add_argument("-o", "--out", type=Path, required=True, help="Output package directory.")
-    p.add_argument("--joints", type=Path, required=True, help="Joints YAML config.")
+    p.add_argument(
+        "--joints",
+        type=Path,
+        help="Joints YAML config (required for STL/OBJ inputs; ignored for STEP).",
+    )
     p.add_argument(
         "--robot-name",
         type=str,
@@ -94,7 +106,11 @@ def _load_mesh_to_link(
 
     suffix = inp.suffix.lower()
     if suffix in {".step", ".stp"}:
-        raise ValueError(STEP_NOT_SUPPORTED_MSG)
+        # STEP is handled by the dedicated single-input STEP route in main(); reaching
+        # here means it was mixed with other meshes, which is unsupported.
+        raise ValueError(STEP_MULTI_INPUT_MSG)
+    if suffix in {".iges", ".igs"}:
+        raise ValueError(IGES_NOT_SUPPORTED_MSG)
 
     name = inp.stem
     if suffix == ".stl":
@@ -121,6 +137,65 @@ def _load_mesh_to_link(
         origin=np.eye(4),
     )
     return link, visual_stl
+
+
+def _build_step_robot(inp: Path, out_dir: Path, robot_name: str) -> Robot:
+    """Import a STEP assembly into a Robot wired for the package emit/scaffold flow.
+
+    `build_robot_from_tree` writes per-part STLs with *absolute* visual/collision
+    paths; the emitter requires *package-relative* paths (`package://` URIs). We
+    therefore build into the package's `meshes/visual` dir, mirror each mesh into
+    `meshes/collision`, bake inertia from the on-disk STL, and rewrite each mesh
+    Link to relative paths — matching the STL pipeline's emit contract. Frame
+    (meshless) links pass through untouched.
+    """
+    try:
+        from cad2urdf.core.extract.build_robot import build_robot_from_tree
+        from cad2urdf.core.extract.mate_classify import classify_default_fixed
+        from cad2urdf.core.extract.spanning_tree import build_spanning_tree
+        from cad2urdf.core.parsers.step import load_step_assembly
+    except ImportError as e:  # pragma: no cover - exercised only without OCP
+        raise ValueError(
+            "STEP import requires OCP. Install it with: pip install -e '.[step]'"
+        ) from e
+
+    visual_dir = out_dir / "meshes" / "visual"
+    collision_dir = out_dir / "meshes" / "collision"
+    visual_dir.mkdir(parents=True, exist_ok=True)
+    collision_dir.mkdir(parents=True, exist_ok=True)
+
+    asm = load_step_assembly(inp)
+    tree = build_spanning_tree(classify_default_fixed(asm.edges), base_id=asm.root_id)
+    raw = build_robot_from_tree(
+        parts=asm.parts,
+        tree=tree,
+        base_id=asm.root_id,
+        robot_name=robot_name,
+        mesh_dir=visual_dir,
+        material=lookup("aluminum_6061"),
+    )
+
+    links: dict[str, Link] = {}
+    for link in raw.links.values():
+        if link.visual_mesh_path is None:
+            links[link.name] = link  # frame link: nothing on disk to rewrite
+            continue
+        abs_visual = link.visual_mesh_path
+        rel = Path("meshes/visual") / abs_visual.name
+        # Mirror the visual STL into the collision tree (matching the STL pipeline).
+        (collision_dir / abs_visual.name).write_bytes(abs_visual.read_bytes())
+        rel_link = Link(
+            name=link.name,
+            visual_mesh_path=rel,
+            collision_mesh_path=Path("meshes/collision") / abs_visual.name,
+            material_density=link.material_density,
+            material_name=link.material_name,
+            inertial_override=link.inertial_override,
+            origin=link.origin,
+        )
+        links[link.name] = _populate_inertia(rel_link, abs_visual)
+
+    return Robot(name=raw.name, base_link=raw.base_link, links=links, joints=raw.joints)
 
 
 def _build_joints(cfg: JointsConfig) -> dict[str, Joint]:
@@ -153,6 +228,9 @@ def _populate_inertia(link: Link, abs_visual_path: Path) -> Link:
     """
     import trimesh as _trimesh  # local import; trimesh already in core deps
 
+    if link.material_density is None:
+        # No density (e.g. a meshless frame link) — nothing to auto-compute.
+        return link
     mesh = _trimesh.load(str(abs_visual_path), file_type="stl", force="mesh")
     if not isinstance(mesh, _trimesh.Trimesh):
         # Couldn't load — keep the existing override (which may already be empty).
@@ -180,19 +258,28 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    try:
-        cfg = load_joints_config(args.joints)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 2
+    is_step = (
+        len(args.inputs) == 1 and args.inputs[0].suffix.lower() in {".step", ".stp"}
+    )
 
-    if args.robot_name:
-        cfg = JointsConfig(
-            robot_name=args.robot_name,
-            base_link=cfg.base_link,
-            joints=cfg.joints,
-            materials=cfg.materials,
-        )
+    cfg: JointsConfig | None = None
+    if not is_step:
+        if args.joints is None:
+            print("error: --joints is required for STL/OBJ inputs", file=sys.stderr)
+            return 2
+        try:
+            cfg = load_joints_config(args.joints)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+
+        if args.robot_name:
+            cfg = JointsConfig(
+                robot_name=args.robot_name,
+                base_link=cfg.base_link,
+                joints=cfg.joints,
+                materials=cfg.materials,
+            )
     package_name = args.package_name or args.out.name
 
     # ------------------------------------------------------------------
@@ -217,61 +304,77 @@ def main(argv: list[str] | None = None) -> int:
         args.out.mkdir(parents=True, exist_ok=True)
         write_started = True
 
-        # Phase 1: load each mesh, write into the package, build Link records (relative paths).
-        rel_links: dict[str, Link] = {}
-        abs_paths: dict[str, Path] = {}
-        for inp in args.inputs:
+        if is_step:
+            # STEP path: a single assembly produces the whole Robot (links + joints).
+            # _build_step_robot writes per-part STLs into the package and returns a
+            # Robot with package-relative mesh paths + baked inertia, ready to emit.
+            robot_name = args.robot_name or args.inputs[0].stem
             try:
-                link, abs_visual = _load_mesh_to_link(inp, args.out, cfg)
+                robot_final = _build_step_robot(args.inputs[0], args.out, robot_name)
+            except (ValueError, FileNotFoundError) as e:
+                print(f"error: {e}", file=sys.stderr)
+                _cleanup_on_error()
+                return 2
+            base_link = robot_final.base_link
+        else:
+            assert cfg is not None  # guaranteed by the is_step branch above
+            # Phase 1: load each mesh, write into the package, build Link records (relative paths).
+            rel_links: dict[str, Link] = {}
+            abs_paths: dict[str, Path] = {}
+            for inp in args.inputs:
+                try:
+                    link, abs_visual = _load_mesh_to_link(inp, args.out, cfg)
+                except ValueError as e:
+                    print(f"error: {e}", file=sys.stderr)
+                    _cleanup_on_error()
+                    return 2
+                rel_links[link.name] = link
+                abs_paths[link.name] = abs_visual
+
+            # Phase 2: build joints + Robot AST.
+            try:
+                joints = _build_joints(cfg)
+                robot = Robot(
+                    name=cfg.robot_name,
+                    base_link=cfg.base_link,
+                    links=rel_links,
+                    joints=joints,
+                )
             except ValueError as e:
                 print(f"error: {e}", file=sys.stderr)
                 _cleanup_on_error()
                 return 2
-            rel_links[link.name] = link
-            abs_paths[link.name] = abs_visual
 
-        # Phase 2: build joints + Robot AST.
-        try:
-            joints = _build_joints(cfg)
-            robot = Robot(
-                name=cfg.robot_name,
-                base_link=cfg.base_link,
-                links=rel_links,
-                joints=joints,
+            # Phase 4: pre-compute inertia from on-disk STLs and bake into each link's
+            # InertialOverride. Single-pass emit: no more absolute-path round trip; the
+            # emitter takes the override-only path and writes a complete <inertial> block.
+            links_with_inertia: dict[str, Link] = {
+                n: _populate_inertia(rel_links[n], abs_paths[n]) for n in rel_links
+            }
+            robot_final = Robot(
+                name=robot.name,
+                base_link=robot.base_link,
+                links=links_with_inertia,
+                joints=robot.joints,
             )
-        except ValueError as e:
-            print(f"error: {e}", file=sys.stderr)
-            _cleanup_on_error()
-            return 2
+            robot_name = cfg.robot_name
+            base_link = cfg.base_link
 
         # Phase 3: structural validation (issues are warnings, not blockers).
-        issues = validate_robot(robot)
+        issues = validate_robot(robot_final)
         for i in issues:
             log.warning("validation issue: %s on %s — %s", i.kind, i.target, i.detail)
 
-        # Phase 4: pre-compute inertia from on-disk STLs and bake into each link's
-        # InertialOverride. Single-pass emit: no more absolute-path round trip; the
-        # emitter takes the override-only path and writes a complete <inertial> block.
-        links_with_inertia: dict[str, Link] = {
-            n: _populate_inertia(rel_links[n], abs_paths[n]) for n in rel_links
-        }
-        robot_final = Robot(
-            name=robot.name,
-            base_link=robot.base_link,
-            links=links_with_inertia,
-            joints=robot.joints,
-        )
-
-        urdf_path = args.out / "urdf" / f"{cfg.robot_name}.urdf"
+        urdf_path = args.out / "urdf" / f"{robot_name}.urdf"
 
         # Phase 5: scaffold ROS package files (skeleton lands first so emit writes into it).
         scaffold_ros_package(
             out_dir=args.out,
             package_name=package_name,
-            urdf_relpath=Path("urdf") / f"{cfg.robot_name}.urdf",
+            urdf_relpath=Path("urdf") / f"{robot_name}.urdf",
             maintainer_name=args.maintainer,
             maintainer_email=args.maintainer_email,
-            base_link_name=cfg.base_link,
+            base_link_name=base_link,
         )
 
         # Phase 6: emit URDF with package:// URIs (final, ROS-correct paths).
