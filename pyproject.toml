@@ -42,6 +42,9 @@ dev = [
     "pytest-cov>=4",
     "pytest-qt>=4.4",
     "mypy>=1.10",
+    # Pinned to the 0.15 minor: there is no [tool.ruff] config, so a newer
+    # ruff could enable new default rules and fail CI on locally-clean code.
+    "ruff>=0.15,<0.16",
     "types-PyYAML",
     "tomli>=2; python_version < '3.11'",
 ]
