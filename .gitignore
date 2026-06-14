@@ -11,3 +11,4 @@ build/
 .DS_Store
 tests/fixtures/meshes/*.stl
 .codebuddy
+CLAUDE.md
