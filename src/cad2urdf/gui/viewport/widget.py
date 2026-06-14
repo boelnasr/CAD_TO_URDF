@@ -147,7 +147,7 @@ class ViewportWidget(QWidget):
 
         for name, link in robot.links.items():
             path = link.visual_mesh_path
-            if not path.is_absolute() or not path.is_file():
+            if path is None or not path.is_absolute() or not path.is_file():
                 continue
             try:
                 mesh = pv.read(str(path))

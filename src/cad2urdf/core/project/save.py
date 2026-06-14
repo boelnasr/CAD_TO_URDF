@@ -57,8 +57,8 @@ def _link_to_dict(link: Link) -> dict[str, Any]:
     ov = link.inertial_override
     return {
         "name": link.name,
-        "visual_mesh_path": str(link.visual_mesh_path),
-        "collision_mesh_path": str(link.collision_mesh_path),
+        "visual_mesh_path": str(link.visual_mesh_path) if link.visual_mesh_path else None,
+        "collision_mesh_path": str(link.collision_mesh_path) if link.collision_mesh_path else None,
         "material_density": link.material_density,
         "material_name": link.material_name,
         "origin": link.origin.tolist(),
@@ -72,10 +72,12 @@ def _link_to_dict(link: Link) -> dict[str, Any]:
 
 def _link_from_dict(d: dict[str, Any]) -> Link:
     ov_d = d["inertial_override"]
+    vmp = d["visual_mesh_path"]
+    cmp = d["collision_mesh_path"]
     return Link(
         name=d["name"],
-        visual_mesh_path=Path(d["visual_mesh_path"]),
-        collision_mesh_path=Path(d["collision_mesh_path"]),
+        visual_mesh_path=Path(vmp) if vmp else None,
+        collision_mesh_path=Path(cmp) if cmp else None,
         material_density=d["material_density"],
         material_name=d["material_name"],
         inertial_override=InertialOverride(

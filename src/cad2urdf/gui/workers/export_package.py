@@ -36,8 +36,8 @@ def _materialize_link_into_pkg(link: Link, out_dir: Path) -> Link:
     import trimesh
 
     visual_src = link.visual_mesh_path
-    if not visual_src.is_absolute() or not visual_src.is_file():
-        return link  # already package-relative or missing — leave untouched
+    if visual_src is None or not visual_src.is_absolute() or not visual_src.is_file():
+        return link  # frame link, already package-relative, or missing — leave untouched
 
     visual_rel = Path("meshes/visual") / f"{link.name}.stl"
     collision_rel = Path("meshes/collision") / f"{link.name}.stl"

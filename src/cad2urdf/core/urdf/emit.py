@@ -40,7 +40,9 @@ def _emit_inertial(parent: ET.Element, link: Link) -> None:
     override-only (or skips if no override at all).
     """
     visual = link.visual_mesh_path
-    if visual.is_absolute() and visual.is_file():
+    if visual is None:
+        return  # frame link: no geometry, no inertial
+    if visual.is_absolute() and visual.is_file() and link.material_density is not None:
         mesh = trimesh.load(str(visual), file_type="stl", force="mesh")
         if not isinstance(mesh, trimesh.Trimesh):
             return
@@ -84,6 +86,9 @@ def _emit_link(parent: ET.Element, link: Link, package_name: str) -> None:
     el = ET.SubElement(parent, "link", attrib={"name": link.name})
     _emit_inertial(el, link)
 
+    if link.visual_mesh_path is None or link.collision_mesh_path is None:
+        return  # frame link: bare <link/>
+
     visual = ET.SubElement(el, "visual")
     ET.SubElement(visual, "origin", attrib={"xyz": "0 0 0", "rpy": "0 0 0"})
     geom = ET.SubElement(visual, "geometry")
@@ -92,7 +97,8 @@ def _emit_link(parent: ET.Element, link: Link, package_name: str) -> None:
         "mesh",
         attrib={"filename": _mesh_uri(package_name, link.visual_mesh_path)},
     )
-    ET.SubElement(visual, "material", attrib={"name": link.material_name})
+    if link.material_name is not None:
+        ET.SubElement(visual, "material", attrib={"name": link.material_name})
 
     collision = ET.SubElement(el, "collision")
     ET.SubElement(collision, "origin", attrib={"xyz": "0 0 0", "rpy": "0 0 0"})
@@ -140,8 +146,8 @@ def emit_urdf(robot: Robot, out_path: Path, *, package_name: str) -> None:
     # at the robot level)
     seen: set[str] = set()
     for link in robot.links.values():
-        if link.material_name in seen:
-            continue
+        if link.material_name is None or link.material_name in seen:
+            continue  # frame links have no material to declare
         seen.add(link.material_name)
         try:
             mat = lookup(link.material_name)

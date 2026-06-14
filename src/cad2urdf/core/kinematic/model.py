@@ -39,13 +39,18 @@ class InertialOverride:
 
 @dataclass
 class Link:
-    """A rigid body in the robot's kinematic tree."""
+    """A rigid body in the robot's kinematic tree.
+
+    A link with no mesh (``visual_mesh_path is None``) is a massless "frame"
+    link — e.g. a sub-assembly node from a STEP import. Material may be None
+    when there is no mesh.
+    """
 
     name: str
-    visual_mesh_path: Path
-    collision_mesh_path: Path
-    material_density: float
-    material_name: str
+    visual_mesh_path: Path | None
+    collision_mesh_path: Path | None
+    material_density: float | None
+    material_name: str | None
     inertial_override: InertialOverride
     origin: NDArray[Any] = field(default_factory=lambda: np.eye(4))
 
@@ -54,7 +59,7 @@ class Link:
             raise ValueError("name must not be empty")
         if self.origin.shape != (4, 4):
             raise ValueError(f"origin must be shape (4, 4), got {self.origin.shape}")
-        if self.material_density <= 0:
+        if self.material_density is not None and self.material_density <= 0:
             raise ValueError(f"material_density must be positive, got {self.material_density}")
 
 
