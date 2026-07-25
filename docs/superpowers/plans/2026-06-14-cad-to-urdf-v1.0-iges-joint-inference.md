@@ -10,12 +10,45 @@
 
 **Rejected alternatives:** B (duplicate the XCAF walk per format — violates DRY, two drift surfaces); C (store `TopoDS_Shape` on the dataclass — breaks `frozen`/serializable invariant and `.cad2urdf` round-trip).
 
-**Tech Stack:** Python 3.10 (no 3.11+ syntax), OCP (`cadquery-ocp`, lazy-imported, conda `pythonocc-core` alternative), trimesh, numpy, PyQt6 (GUI wiring), MCP SDK (MCP wiring), pytest (`importorskip("OCP")`).
+**Tech Stack:** Python 3.10 (no 3.11+ syntax), OCP (`cadquery-ocp`,
+lazy-imported through the `[step]` extra), trimesh, numpy, PyQt6 (GUI wiring),
+MCP SDK (MCP wiring), pytest (`importorskip("OCP")`). `pythonocc-core` is not a
+drop-in alternative because it exposes the `OCC.Core` namespace rather than
+`OCP`.
 
-**Spec:** [[2026-06-14-cad-to-urdf-v1.0-iges-joint-inference-design]] (write this design doc as Task 0 if it does not yet exist; otherwise this plan stands alone)
+**Spec:** The approved implementation plan stands alone; no duplicate design
+document was created.
 
 **Run prefix (all test/lint/type commands):**
 `unset PYTHONPATH AMENT_PREFIX_PATH && source .venv/bin/activate &&` — GUI tests additionally need `export QT_QPA_PLATFORM=offscreen PYVISTA_OFF_SCREEN=true`. mypy is strict on `core/`/`gui/`/`mcp/`. OCP is installed in the dev `.venv` and via `[step]`.
+
+---
+
+## Implementation outcome (2026-07-25)
+
+The v1.0 implementation is complete on the feature branch and the package
+metadata is `1.0.0`. The original checklists below are retained as the work
+breakdown that guided implementation; this outcome section is the authoritative
+status summary.
+
+- The public parser API remains `load_step_assembly(path) -> StepAssembly`; the
+  transient-shape variant is a separate API.
+- CLI, GUI, and MCP use one `import_cad` path for STEP and IGES. A CAD import
+  replaces the active document and clears undo/redo.
+- Moving hints require confidence `>= 0.6`. Limitless concentric geometry maps
+  to `continuous`; bounded concentric geometry maps to `revolute` (with `±π`
+  fallback); sliding geometry maps to `prismatic` (with `±0.1 m` fallback).
+- Inference was expanded beyond direct CAF edges to compare shaped siblings in
+  a common assembly frame, then select a deterministic maximum-confidence
+  forest. Oblique/nonrectangular guides, incompatible axes, and multi-parent
+  XCAF instances conservatively remain fixed.
+- OCP B-rep handles stay outside the serializable AST and are released before
+  `Robot` construction. Schema-v1 project saves retain mesh paths only; they do
+  not bundle durable CAD assets.
+- CI already installs `[dev,gui,step,mcp]`; generated STEP/IGES fixtures cover
+  both readers and the geometry-inference path.
+
+No release tag is created by this implementation task.
 
 ---
 
@@ -163,11 +196,11 @@ infer_edge_hints(
 
 **Files:** `pyproject.toml`, `.github/workflows/ci.yml`, `README.md`, fixtures under `tests/`.
 
-- [ ] **Step 1 — Fixtures.** Add/generate small IGES + STEP fixtures with a known revolute (concentric) and prismatic (sliding) mate. Prefer generating them in a fixture helper (OCP/cadquery) over committing large binaries; gate with `importorskip("OCP")` and a `needs_step_fixture`-style marker.
-- [ ] **Step 2 — OCP-not-on-PyPI / CI.** CI already installs `[dev,gui,step,mcp]` (pulls `cadquery-ocp`) and runs under `xvfb`. Confirm the IGES path is exercised. If a future pure-pip-without-OCP matrix leg is wanted, ensure all OCP-dependent tests `importorskip("OCP")` so the no-OCP leg stays green. **The pure non-OCP `mate_classify` hint path must have coverage that runs without OCP.**
-- [ ] **Step 3 — mypy strict.** New modules (`caf.py`, `iges.py`, `joint_infer.py`) clean under strict; reuse the OCP `import-untyped` override.
-- [ ] **Step 4 — Full gate.** `unset PYTHONPATH AMENT_PREFIX_PATH && pytest && mypy && ruff check` all green (GUI tests with offscreen env).
-- [ ] **Step 5 — README.** Roadmap: move IGES + auto-classification to "shipped v1.0". Install: note IGES uses the same `[step]`/OCP path (no new extra). GUI/CLI: document IGES inputs and that joints are now auto-typed (review/confirm in editor). MCP: add the `import_cad` tool row. Add a joint-inference algorithm subsection with a **Mermaid** flowchart (concentric→revolute / sliding→prismatic / else→fixed). Bump status badge to v1.0.
+- [x] **Step 1 — Fixtures.** Add/generate small IGES + STEP fixtures with a known revolute (concentric) and prismatic (sliding) mate. Prefer generating them in a fixture helper (OCP/cadquery) over committing large binaries; gate with `importorskip("OCP")` and a `needs_step_fixture`-style marker.
+- [x] **Step 2 — OCP-not-on-PyPI / CI.** CI already installs `[dev,gui,step,mcp]` (pulls `cadquery-ocp`) and runs under `xvfb`. Confirm the IGES path is exercised. If a future pure-pip-without-OCP matrix leg is wanted, ensure all OCP-dependent tests `importorskip("OCP")` so the no-OCP leg stays green. **The pure non-OCP `mate_classify` hint path must have coverage that runs without OCP.**
+- [x] **Step 3 — mypy strict.** New modules (`caf.py`, `iges.py`, `joint_infer.py`) clean under strict; reuse the OCP `import-untyped` override.
+- [x] **Step 4 — Full gate.** `unset PYTHONPATH AMENT_PREFIX_PATH && pytest && mypy && ruff check` all green (GUI tests with offscreen env).
+- [x] **Step 5 — README.** Roadmap: move IGES + auto-classification to "shipped v1.0". Install: note IGES uses the same `[step]`/OCP path (no new extra). GUI/CLI: document IGES inputs and that joints are now auto-typed (review/confirm in editor). MCP: add the `import_cad` tool row. Add a joint-inference algorithm subsection with a **Mermaid** flowchart (concentric→revolute / sliding→prismatic / else→fixed). Bump status badge to v1.0.
 
 **Acceptance:** CI green on a matrix that exercises STEP + IGES + GUI + MCP; README accurately reflects v1.0 capabilities and the new tool; mypy/ruff clean.
 

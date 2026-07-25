@@ -2,11 +2,12 @@
 
 Convert CAD assemblies into ROS 2-ready URDF packages.
 
-[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-312%20passed-brightgreen)](#testing) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v0.2.0a0%20alpha-orange)](#status--roadmap)
+[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-371%20passed-brightgreen)](#development) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v1.0.0-brightgreen)](#status--roadmap)
 
-`cad2urdf` takes mesh files (STL or OBJ) or a STEP assembly (`.stp`/`.step`, via
-the `[step]` extra) plus a YAML joint description — or, for STEP, the assembly's
-own named parts and poses — and emits a complete ROS 2 ament_cmake package — URDF + meshes
+`cad2urdf` takes mesh files (STL or OBJ) plus a YAML joint description, or a
+STEP/IGES assembly (`.stp`/`.step`/`.igs`/`.iges`, via the `[step]` extra) whose
+named parts, poses, and conservative joint hypotheses are read directly. It
+emits a complete ROS 2 ament_cmake package — URDF + meshes
 + `package.xml` + `CMakeLists.txt` + `launch/display.launch.py` + `rviz/display.rviz`
 — ready to drop into a workspace and view in RViz. Inertia is auto-computed
 from each mesh using a user-supplied material density, validated by the user's
@@ -18,21 +19,22 @@ from each mesh using a user-supplied material density, validated by the user's
 
 | Version | Status | Scope |
 |---|---|---|
-| **v0.2.0a0** (current) | shipping | Everything in v0.1.0a0 **plus** the PyQt6/VTK GUI, an MCP server that drives it end-to-end, and **STEP assembly import** (`.stp`/`.step` via the `[step]` extra — each part becomes a link, joined by fixed joints you re-type in the editor) |
+| **v1.0.0** (current) | shipped | STEP + IGES assembly import across CLI, GUI, and MCP, with conservative geometry-based inference of continuous/revolute/prismatic joints and a safe fixed fallback |
+| v0.2.0a0 | shipped | PyQt6/VTK GUI, end-to-end MCP control, and STEP assembly import |
 | v0.1.0a0 | shipped | CLI core: STL/OBJ in, full ROS package out, ManipulaPy validation gate |
-| v1.0 | next | IGES support; richer assembly mate extraction (auto-classify revolute/prismatic) |
-| v2.x | planned | LLM natural-language priors ("6-DOF arm with parallel-jaw gripper") |
+| v2.x | planned | Planar-joint inference and optional natural-language priors |
 | v3.x | planned | ML-based kinematic skeleton extraction (URDFormer-class) from raw meshes |
 | v-future | planned | xacro / SDF / MJCF emitters; macOS + Windows packaging |
 
-The full design lives in [`docs/superpowers/specs/2026-04-26-cad-to-urdf-converter-design.md`](docs/superpowers/specs/2026-04-26-cad-to-urdf-converter-design.md).
-The v1-alpha implementation plan is at [`docs/superpowers/plans/2026-04-26-cad-to-urdf-v1-alpha-cli-core.md`](docs/superpowers/plans/2026-04-26-cad-to-urdf-v1-alpha-cli-core.md).
+See the [v1.0 implementation plan](docs/superpowers/plans/2026-06-14-cad-to-urdf-v1.0-iges-joint-inference.md),
+the historical [STEP assembly design](docs/superpowers/specs/2026-06-13-step-assembly-import-design.md),
+and the [changelog](CHANGELOG.md).
 
 ---
 
 ## Install
 
-### Pip-only path (recommended for v0.2.0a0)
+### Pip-only path (recommended for v1.0.0)
 
 ```bash
 python3.10 -m venv .venv
@@ -43,29 +45,32 @@ pip install -e ".[dev]"
 Targets Python 3.10+ (matches Ubuntu 22.04 / ROS 2 Humble baseline). STL and OBJ
 mesh inputs are fully supported out of the box.
 
-### STEP import extra
+### CAD assembly import extra (STEP + IGES)
 
 ```bash
 pip install -e ".[step]"
 ```
 
 Adds [`cadquery-ocp`](https://pypi.org/project/cadquery-ocp/) — the
-pip-installable OCCT (OpenCASCADE) binding — enabling `.stp` / `.step` assembly
-import in both the CLI and the GUI. Each named part in the assembly becomes a
-link (with its tessellated mesh and pose); sub-assembly nodes become meshless
-"frame" links; parts are joined by `fixed` joints you can re-type in the editor.
-OCP is lazy-imported, so the core package still installs and runs without it.
+pip-installable OCCT (OpenCASCADE) binding — enabling `.stp` / `.step` and
+`.iges` / `.igs` assembly import in the CLI, GUI, and MCP server. The extra
+keeps its historical `[step]` name; IGES does not need another dependency.
+Each named part becomes a link (with its tessellated mesh and pose), while
+sub-assembly nodes become meshless frame links. Joint inference is advisory:
+review the generated types, axes, and limits in the Joint Editor before using
+the robot. OCP is lazy-imported, so the core package still runs without it.
 
-### Conda path (alternative OCCT binding)
+### Conda path
 
 ```bash
 conda env create -f environment.yml
 conda activate cad2urdf
 ```
 
-`pythonOCC-core` is the conda-forge OCCT binding (not on PyPI). The code targets
-the OCP API that both `cadquery-ocp` (pip) and `pythonocc-core` (conda) expose,
-so either install path enables STEP import.
+The environment uses Conda for Python and installs this project with its
+`[step]` extra, so the runtime still uses the verified `cadquery-ocp` binding.
+`pythonocc-core` exposes a different Python import namespace and is not a
+drop-in replacement for this code.
 
 ### ManipulaPy validation extra
 
@@ -207,15 +212,20 @@ cad2urdf-gui
 
 ```mermaid
 flowchart LR
-    IMP[Import meshes<br/>STL / OBJ / STEP] --> TREE[Build kinematic tree<br/>drag / right-click reparent]
+    IMP[Import meshes or assembly<br/>STL / OBJ / STEP / IGES] --> TREE[Review kinematic tree<br/>drag / right-click reparent]
     TREE --> JOINT[Edit joints<br/>type · axis · limits]
     JOINT --> EXP[Export ROS 2 package<br/>or save .cad2urdf project]
 ```
 
 - **Import** one mesh per moving part (`File → Import Meshes`); the first becomes
   the base link and the rest are attached, then you reshape the tree.
+- **Import CAD assembly** (`File → Import CAD assembly`, needs the `[step]`
+  extra) — load one STEP or IGES file. Named parts, assembly poses, and
+  conservative joint hypotheses are imported together.
 - **Link Tree** dock — reparent links (right-click or drag) into a chain.
-- **Joint Editor** dock — set each joint's type, axis, and limits.
+- **Joint Editor** dock — review inferred joints and set each joint's type,
+  axis, origin, and limits. Inference is a starting point, not a CAD constraint
+  solver; confirm it against the intended mechanism.
 - **3D viewport** — a studio-rendered view that places every link at its
   forward-kinematic world pose (the assembled robot, matching the exported URDF /
   RViz), with PBR metallic shading, soft lighting + ground shadow, and a
@@ -223,13 +233,10 @@ flowchart LR
 - **Export** a full ROS 2 ament package (`Export → Export ROS Package`) or save a
   `.cad2urdf` project to reopen later.
 
-- **Import STEP** (`File → Import STEP`, needs the `[step]` extra) — load a full
-  `.stp` / `.step` assembly in one step: each named part becomes a link with its
-  mesh and pose, joined by fixed joints you can re-type in the Joint Editor.
-
 > **Inputs.** The GUI imports `.stl` / `.obj` meshes (one file per link) and, with
-> the `[step]` extra installed, full STEP assemblies. IGES is not supported yet —
-> see [Status & Roadmap](#status--roadmap).
+> the `[step]` extra installed, full STEP (`.step` / `.stp`) and IGES (`.iges` /
+> `.igs`) assemblies. Importing an assembly replaces the current document and
+> clears undo/redo history.
 
 Running headless (no display)? See the offscreen env vars under
 [Headless / CI use](#headless--ci-use).
@@ -253,7 +260,9 @@ claude mcp add cad2urdf -- cad2urdf-mcp
 ```
 
 The server spawns the GUI on first use over a private Unix-domain socket (no
-network exposure), then proxies high-level commands onto the GUI's main thread.
+network exposure), then proxies high-level commands onto the GUI. CAD parsing
+and inference run in a background worker while control requests retain FIFO
+ordering.
 The socket lives in an owner-only (`0o700`) temp directory, which is the access
 control for the unauthenticated control channel:
 
@@ -299,15 +308,15 @@ export PYVISTA_OFF_SCREEN=true
 ## CLI Reference
 
 ```
-cad2urdf <inputs>... --joints CONFIG.yaml -o OUT_DIR [options]
+cad2urdf <inputs>... -o OUT_DIR [--joints CONFIG.yaml] [options]
 ```
 
 | Flag | Purpose |
 |---|---|
-| `<inputs>...` | One or more STL or OBJ files (each file's stem becomes a link name), **or** a single `.stp` / `.step` assembly (parts/poses read directly; needs the `[step]` extra). |
+| `<inputs>...` | One or more STL or OBJ files (each file's stem becomes a link name), **or** one STEP/IGES assembly (`.stp`, `.step`, `.igs`, `.iges`; needs the `[step]` extra). CAD assemblies cannot be mixed with other inputs. |
 | `-o, --out PATH` | Output directory. Will be created if missing. If pre-existing, **never** deleted on rollback (we only clean dirs we created). |
-| `--joints PATH` | YAML config defining joint topology, axes, limits, and per-link materials (see schema below). |
-| `--robot-name NAME` | Override `robot_name` from the joints YAML. |
+| `--joints PATH` | YAML config defining joint topology, axes, limits, and per-link materials (required for STL/OBJ; ignored for CAD assemblies). |
+| `--robot-name NAME` | Override `robot_name` from YAML, or the CAD filename stem. |
 | `--package-name NAME` | ROS package name. Must match `^[a-z][a-z0-9_]*$`. Defaults to `out_dir.name`. |
 | `--maintainer NAME` | Maintainer name written into `package.xml` (XML-escaped). Default `cad2urdf-user`. |
 | `--maintainer-email ADDR` | Maintainer email (XML-escaped via `quoteattr`). Default `user@example.com`. |
@@ -315,6 +324,16 @@ cad2urdf <inputs>... --joints CONFIG.yaml -o OUT_DIR [options]
 | `-v, -vv` | Increase log verbosity (info, debug). |
 
 Exit codes: `0` success, `2` error (config invalid, mesh load failed, joint structure invalid, write failed). Errors trigger automatic rollback of the output directory if we created it; pre-existing user directories are preserved.
+
+For example, import an assembly without a joints YAML:
+
+```bash
+cad2urdf robot.iges -o robot_description --no-validate
+```
+
+The CAD path infers candidate joints from geometry, builds a deterministic
+maximum-confidence tree, and emits the package. Treat the result as advisory
+and review it in the GUI before deploying it to hardware.
 
 ---
 
@@ -375,16 +394,20 @@ To use a custom material, add it to `config/materials.json` (the loader caches t
 
 ```mermaid
 flowchart TD
-    STL["STL/OBJ inputs"]
+    MESH["STL/OBJ inputs"]
+    CAD["STEP/IGES assembly"]
     YAML["joints.yaml<br/>+ materials"]
     MAT["materials<br/>(cached)"]
     MP["ManipulaPy<br/>(optional)"]
 
-    STL --> PARSE
+    MESH --> PARSE
     YAML --> PARSE
+    CAD --> CAF
     MAT --> INERTIA
 
-    PARSE["core/parsers + core/config.loader<br/>• trimesh.load → Trimesh<br/>• YAML → JointSpec + JointsConfig (schema-checked)"]
+    PARSE["mesh parsers + config loader<br/>Trimesh + schema-checked joints"]
+    CAF["shared XCAF walk<br/>parts + poses + transient B-reps"]
+    INFER["joint inference<br/>geometry hints + confidence<br/>maximum-confidence forest"]
     INERTIA["core/inertia.compute<br/>mesh + density → mass/com/I<br/>(mesh.copy() — no mutation)"]
     MODEL["core/kinematic.model.Robot<br/>Link + Joint + InertialOverride dataclasses"]
     VALIDATE["core/kinematic.validate<br/>cycles, dangling, multi-parent, missing base"]
@@ -392,6 +415,7 @@ flowchart TD
     PKG["core/urdf.package<br/>ROS scaffolding (package.xml,<br/>CMakeLists, launch.py, rviz)"]
     OUT["&lt;out_dir&gt;/<br/>├── urdf/&lt;robot&gt;.urdf<br/>├── meshes/{visual, collision}/<br/>├── package.xml<br/>├── CMakeLists.txt<br/>├── launch/<br/>└── rviz/display.rviz"]
 
+    CAF --> INFER --> MODEL
     PARSE --> INERTIA --> MODEL --> VALIDATE --> EMIT --> PKG --> OUT
     MP -. "optional validation:<br/>parse URDF back via<br/>ManipulaPy.URDFToSerialManipulator,<br/>confirm IK + dynamics construct" .-> OUT
 ```
@@ -399,6 +423,8 @@ flowchart TD
 **Key invariants:**
 
 - The `Robot` dataclass is the **single source of truth** between parsing and emission. All transformations operate on it.
+- OCP B-rep handles are transient inference inputs. They are cleared before the
+  `Robot` is built and never enter project JSON or MCP payloads.
 - `core/` has zero `Qt` or `VTK` imports (enforced by file structure; the GUI lives entirely in the separate `gui/` package and builds on `core/`).
 - URDF mesh paths are always `package://<pkg>/<rel>` — absolute paths and `..` segments are rejected at the boundary.
 - `package_name` is validated against ROS naming rules (`^[a-z][a-z0-9_]*$`); `urdf_relpath` components must match `^[a-zA-Z0-9_.-]+$` to prevent template injection into generated launch.py.
@@ -409,6 +435,38 @@ flowchart TD
 ## Algorithms
 
 The non-trivial steps behind the pipeline, each linked to its source.
+
+### Advisory CAD joint inference — `core/extract/joint_infer.py`
+
+For STEP/IGES imports, the shared CAF parser supplies each leaf body's transient
+B-rep shape. Geometry probes compare sibling bodies in their common assembly
+frame and attach a mate hint, axis, limits when trustworthy, and confidence to
+candidate edges. Only hints at or above the default `0.6` confidence threshold
+can produce a moving joint:
+
+```mermaid
+flowchart TD
+    A["STEP/IGES parts + poses<br/>transient B-rep side map"] --> B["compare shaped sibling bodies<br/>in common assembly frame"]
+    B --> C{"unambiguous geometry?"}
+    C -->|"coaxial cylinders"| D{"rotation bounded?"}
+    D -->|no| E["continuous"]
+    D -->|yes| F["revolute<br/>measured limits or ±π fallback"]
+    C -->|"bilaterally enclosed<br/>rectangular planar guide"| G["prismatic<br/>measured travel or ±0.1 m fallback"]
+    C -->|"ambiguous / unsupported"| H["fixed"]
+    E --> I{"confidence ≥ 0.6?"}
+    F --> I
+    G --> I
+    I -->|no| H
+    I -->|yes| J["maximum-confidence forest<br/>fixed frame anchors added as needed"]
+    H --> J
+    J --> K["editable Robot tree"]
+```
+
+This is deliberately conservative. Conflicting cylinder axes, one-sided or
+L-shaped contacts, oblique/nonrectangular guides, and multi-parent XCAF
+instances stay fixed. The result is an editable hypothesis, not proof of the
+mechanism's degrees of freedom: confirm joint type, parent/child relationship,
+axis, origin, and limits before simulation or hardware use.
 
 ### Inertia computation — `core/inertia/compute.py`
 
@@ -469,7 +527,8 @@ A CAD assembly is a graph that may contain loops. A breadth-first walk from the
 base keeps the first edge that reaches each new node and drops loop-closing
 edges. An edge traversed "backwards" is re-directed away from the base — its
 relative pose is inverted and its axis negated. Nodes unreachable from the base
-raise `SpanningTreeError`. (Feeds the v1.0 STEP-assembly path.)
+raise `SpanningTreeError`. This is the final graph-to-tree step for STEP and
+IGES imports.
 
 ```mermaid
 flowchart LR
@@ -534,6 +593,11 @@ The CLI is stateless, but `core/project/save.py` exposes `save_project(robot, pa
 
 Schema migrations live in a `_MIGRATIONS: dict[(int,int), Callable]` registry — empty in v1, populated when `SCHEMA_VERSION` bumps. Loading an unsupported version raises with a pointer to the registry file.
 
+> **Schema-v1 asset limitation.** A project file stores mesh paths; it does not
+> embed or bundle the referenced mesh/CAD assets. Keep those files in stable
+> locations when moving or reopening a project. Durable, self-contained CAD
+> asset bundles require a future schema.
+
 ---
 
 ## Development
@@ -542,7 +606,7 @@ Schema migrations live in a `_MIGRATIONS: dict[(int,int), Callable]` registry �
 
 ```bash
 unset PYTHONPATH AMENT_PREFIX_PATH    # strip ROS leakage
-pytest                                # 312 unit + integration + gui tests
+pytest                                # 371 passing unit + integration + GUI tests
 pytest -m slow                        # ManipulaPy validation tests (need [urdf-io])
 ```
 
@@ -559,8 +623,10 @@ The type checker is clean on every committed revision; CI enforces this gate.
 [GitHub Actions](.github/workflows/ci.yml) runs on every push to `main` and every
 pull request: **ruff** (lint), **mypy** (strict), and the **full pytest suite**
 (unit + integration + GUI). The job installs the `[dev,gui,step,mcp]` extras so
-the STEP (OCP) and Qt/VTK paths are exercised, and runs the GUI/STEP tests
+the STEP/IGES (OCP) and Qt/VTK paths are exercised, and runs the GUI/CAD tests
 headless under `xvfb` with `QT_QPA_PLATFORM=offscreen` + `PYVISTA_OFF_SCREEN=true`.
+Generated STEP and IGES fixtures exercise both CAD readers and the inference
+path without committing large binary fixtures.
 
 ### Project layout
 
@@ -569,8 +635,8 @@ cad2urdf/
 ├── src/cad2urdf/
 │   ├── core/                         # zero Qt/VTK imports — drives the CLI
 │   │   ├── kinematic/                # Robot/Link/Joint/InertialOverride + tree + validate
-│   │   ├── parsers/                  # stl, obj, step (OCP/XCAF assembly walk)
-│   │   ├── extract/                  # types.AssemblyEdge, mate_classify, spanning_tree, build_robot
+│   │   ├── parsers/                  # stl, obj, shared CAF walk, step + iges wrappers
+│   │   ├── extract/                  # geometry inference, classification, spanning tree, Robot build
 │   │   ├── inertia/                  # materials table, mass/COM/inertia compute
 │   │   ├── meshing/                  # OCC tessellation hook
 │   │   ├── urdf/                     # emit (URDF 1.0 XML), package (ROS scaffolding)
@@ -580,12 +646,12 @@ cad2urdf/
 │   └── cli/main.py                   # argparse + 7-phase pipeline orchestrator
 ├── tests/
 │   ├── unit/                         # one file per core module
-│   ├── integration/                  # end-to-end CLI + STEP pipeline runs
+│   ├── integration/                  # end-to-end CLI + STEP/IGES/inference runs
 │   └── gui/                          # Qt + viewport (offscreen)
 ├── config/materials.json             # default density table
 ├── docs/superpowers/                 # specs/ + plans/ — design source of truth
 ├── pyproject.toml                    # Python 3.10+, manipulapy in [urdf-io] extra
-├── environment.yml                   # conda scaffolding for v1.0 STEP path
+├── environment.yml                   # conda + pip scaffolding for the verified OCP path
 └── README.md
 ```
 
@@ -604,13 +670,13 @@ The robotics URDF tooling landscape is split between proprietary CAD plugins
 (SolidWorks-to-URDF, Fusion-to-URDF, Onshape-to-URDF) and free tools that
 require manual joint authoring inside a CAD package (FreeCAD CROSS, Phobos for
 Blender). `cad2urdf` is the **scriptable middle ground**: take meshes you
-already have, describe the kinematics in 20 lines of YAML, and get a complete
-ROS package out — no GUI, no proprietary CAD license, no manual XML.
+already have and describe their kinematics in YAML, or import a STEP/IGES
+assembly and review the conservative inferred tree, then get a complete ROS
+package out — no proprietary CAD plugin and no manual XML.
 
-The eventual v3 ML pipeline aims to remove the YAML step too, by inferring the
-joint tree directly from the geometry. But shipping the boring deterministic
-core first means the ML predictions can be diffed against, edited, and verified
-by a system that already works.
+The deterministic v1 geometry path handles clear cylindrical and linear-guide
+cases. A future ML pipeline can broaden coverage while keeping predictions
+editable and verifiable against the same core model.
 
 ---
 
@@ -621,7 +687,6 @@ MIT. See `pyproject.toml`.
 ## Acknowledgements
 
 Built on top of [trimesh](https://github.com/mikedh/trimesh),
-[cadquery-ocp](https://pypi.org/project/cadquery-ocp/) /
-[pythonOCC-core](https://github.com/tpaviot/pythonocc-core) (STEP import),
+[cadquery-ocp](https://pypi.org/project/cadquery-ocp/) (STEP/IGES import),
 [ManipulaPy](https://github.com/boelnasr/ManipulaPy), and the
 [ROS 2](https://docs.ros.org/) ecosystem.
