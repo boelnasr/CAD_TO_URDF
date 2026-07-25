@@ -1,7 +1,7 @@
 """cad2urdf CLI: input meshes + joint config → ROS 2 URDF package.
 
 STL/OBJ inputs (one mesh per link, joints from YAML) or one CAD assembly
-(.step/.stp/.iges/.igs; each part becomes a fixed-jointed link).
+(.step/.stp/.iges/.igs; each part becomes an inferred-or-fixed link).
 """
 
 from __future__ import annotations
@@ -151,7 +151,11 @@ def _build_cad_robot(inp: Path, out_dir: Path, robot_name: str) -> Robot:
     """
     try:
         from cad2urdf.core.extract.build_robot import build_robot_from_tree
-        from cad2urdf.core.extract.mate_classify import classify_default_fixed
+        from cad2urdf.core.extract.joint_infer import infer_edge_hints
+        from cad2urdf.core.extract.mate_classify import (
+            classify_default_fixed,
+            classify_from_hints,
+        )
         from cad2urdf.core.extract.spanning_tree import build_spanning_tree
     except ImportError as e:  # pragma: no cover - exercised only without OCP
         raise ValueError(
@@ -160,13 +164,13 @@ def _build_cad_robot(inp: Path, out_dir: Path, robot_name: str) -> Robot:
 
     suffix = inp.suffix.lower()
     if suffix in {".step", ".stp"}:
-        from cad2urdf.core.parsers.step import load_step_assembly
+        from cad2urdf.core.parsers.step import load_step_assembly_with_shapes
 
-        loader = load_step_assembly
+        loader = load_step_assembly_with_shapes
     elif suffix in {".iges", ".igs"}:
-        from cad2urdf.core.parsers.iges import load_iges_assembly
+        from cad2urdf.core.parsers.iges import load_iges_assembly_with_shapes
 
-        loader = load_iges_assembly
+        loader = load_iges_assembly_with_shapes
     else:
         raise ValueError(f"unsupported CAD assembly format: {inp.suffix!r}")
 
@@ -176,13 +180,22 @@ def _build_cad_robot(inp: Path, out_dir: Path, robot_name: str) -> Robot:
     collision_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        asm = loader(inp)
+        asm, shapes = loader(inp)
     except ImportError as e:  # pragma: no cover - exercised only without OCP
         raise ValueError(
             "CAD import requires OCP. Install it with: pip install -e '.[step]'"
         ) from e
+    try:
+        classified = (
+            classify_from_hints(infer_edge_hints(asm.edges, shapes))
+            if shapes
+            else classify_default_fixed(asm.edges)
+        )
+    finally:
+        shapes.clear()
+        del shapes
     tree = (
-        build_spanning_tree(classify_default_fixed(asm.edges), base_id=asm.root_id)
+        build_spanning_tree(classified, base_id=asm.root_id)
         if asm.edges
         else []
     )

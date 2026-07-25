@@ -1,9 +1,9 @@
 """Turn a classified spanning tree + parts into a Robot (Task 4.3).
 
 Leaf parts get a written STL + material; assembly nodes become meshless "frame"
-links. Each tree edge becomes a fixed joint. ``StepPart`` assigns ``id == name``
-(both the sanitized, de-duplicated, URDF-valid name), so link lookups by name are
-unambiguous.
+links. Each classified tree edge becomes a joint. ``StepPart`` assigns
+``id == name`` (both the sanitized, de-duplicated, URDF-valid name), so link
+lookups by name are unambiguous.
 """
 
 from __future__ import annotations
@@ -16,6 +16,10 @@ from cad2urdf.core.extract.mate_classify import ClassifiedJoint
 from cad2urdf.core.inertia.materials import Material
 from cad2urdf.core.kinematic.model import InertialOverride, Joint, Link, Robot
 from cad2urdf.core.parsers.step import StepPart
+
+_LIMITED_JOINT_TYPES = frozenset({"revolute", "prismatic"})
+_DEFAULT_CAD_JOINT_EFFORT = 1.0
+_DEFAULT_CAD_JOINT_VELOCITY = 1.0
 
 
 def build_robot_from_tree(
@@ -30,7 +34,7 @@ def build_robot_from_tree(
     """Build a Robot from parts + a classified spanning tree.
 
     Leaf parts get a written STL + material; assembly nodes become meshless frame
-    links. Each tree edge becomes a fixed joint with the edge's relative pose.
+    links. Each tree edge becomes a classified joint with the edge's relative pose.
     """
     by_id = {p.id: p for p in parts}
     node_ids = {base_id} | {e.parent_id for e in tree} | {e.child_id for e in tree}
@@ -64,6 +68,7 @@ def build_robot_from_tree(
     for e in tree:
         pname, cname = by_id[e.parent_id].name, by_id[e.child_id].name
         jn = f"{cname}_to_{pname}"
+        needs_limits = e.joint_type in _LIMITED_JOINT_TYPES
         joints[jn] = Joint(
             name=jn,
             type=e.joint_type,
@@ -71,6 +76,13 @@ def build_robot_from_tree(
             child=cname,
             axis=np.asarray(e.axis, dtype=float),
             origin=np.asarray(e.relative_pose, dtype=float),
+            limit_lower=e.limit_lower,
+            limit_upper=e.limit_upper,
+            # Static CAD geometry cannot infer actuator capability. Small,
+            # usable placeholders keep emitted URDF valid until users replace
+            # them with actuator-specific values in the editor/configuration.
+            effort=_DEFAULT_CAD_JOINT_EFFORT if needs_limits else None,
+            velocity=_DEFAULT_CAD_JOINT_VELOCITY if needs_limits else None,
         )
 
     return Robot(

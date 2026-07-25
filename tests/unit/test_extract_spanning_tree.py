@@ -74,3 +74,31 @@ def test_reversed_edge_inverts_pose_and_negates_axis() -> None:
     assert np.allclose(e.relative_pose, expected_inv)
     # Axis negated.
     assert np.allclose(e.axis, np.array([-1.0, 0.0, 0.0]))
+
+
+def test_reversed_edge_rotates_axis_into_new_parent_and_negates_limits() -> None:
+    # R maps child +X into parent +Y. Reversal must first express the original
+    # parent-frame +Y axis in the new parent (old child), then negate it.
+    pose = np.eye(4)
+    pose[:3, :3] = np.array(
+        [
+            [0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    edge = ClassifiedJoint(
+        parent_id="p",
+        child_id="c",
+        joint_type="prismatic",
+        axis=np.array([0.0, 1.0, 0.0]),
+        relative_pose=pose,
+        limit_lower=-0.02,
+        limit_upper=0.08,
+    )
+
+    reversed_edge = build_spanning_tree([edge], base_id="c")[0]
+
+    assert reversed_edge.axis == pytest.approx([-1.0, 0.0, 0.0])
+    assert reversed_edge.limit_lower == pytest.approx(-0.08)
+    assert reversed_edge.limit_upper == pytest.approx(0.02)

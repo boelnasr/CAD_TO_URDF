@@ -38,3 +38,6 @@ class AssemblyEdge:
     source_label: str | None = None  # human-readable label from the source file
     mate_kind: str | None = None  # raw OCC/STEP mate kind hint, before classification
     confidence: float = 1.0  # 0.0-1.0; default 1.0 = "asserted by source"
+    axis: NDArray[Any] | None = None  # candidate motion axis in the parent frame
+    limit_lower: float | None = None  # radians for rotation, metres for translation
+    limit_upper: float | None = None  # radians for rotation, metres for translation
