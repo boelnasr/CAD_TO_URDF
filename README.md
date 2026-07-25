@@ -273,7 +273,7 @@ live and land on the undo/redo stack. Available tools:
 | Group | Tools |
 |---|---|
 | Introspect | `get_robot`, `list_materials`, `get_history`, `gui_status` |
-| Build | `import_meshes`, `set_base_link`, `rename_link`, `remove_link`, `set_link_material` |
+| Build | `import_meshes`, `import_cad`, `set_base_link`, `rename_link`, `remove_link`, `set_link_material` |
 | Joints | `update_joint` (type / axis / origin / limits / reparent) |
 | Project / export | `save_project`, `open_project`, `validate`, `export_package` |
 | Control | `undo`, `redo`, `screenshot` (on-demand PNG) |

@@ -1,8 +1,7 @@
 """cad2urdf CLI: input meshes + joint config → ROS 2 URDF package.
 
-STL/OBJ inputs (one mesh per link, joints from YAML) or a single STEP (.step/.stp)
-assembly (each part becomes a link, joined by fixed joints — needs the ``[step]``
-extra, i.e. ``pip install -e '.[step]'``).
+STL/OBJ inputs (one mesh per link, joints from YAML) or one CAD assembly
+(.step/.stp/.iges/.igs; each part becomes a fixed-jointed link).
 """
 
 from __future__ import annotations
@@ -37,13 +36,13 @@ from cad2urdf.core.validation.manipulapy_gate import validate_urdf
 
 log = logging.getLogger("cad2urdf")
 
-STEP_MULTI_INPUT_MSG = (
-    "STEP/.stp assemblies must be passed as a single input file (the whole "
-    "assembly becomes one Robot); do not mix STEP with other meshes."
+CAD_ASSEMBLY_SUFFIXES = frozenset({".step", ".stp", ".iges", ".igs"})
+CAD_MULTI_INPUT_MSG = (
+    "CAD assemblies (.step/.stp/.iges/.igs) must be passed as a single input "
+    "file (the whole assembly becomes one Robot); do not mix CAD with other meshes."
 )
-IGES_NOT_SUPPORTED_MSG = (
-    "IGES inputs are not supported. Use a STEP (.step/.stp) assembly or STL/OBJ meshes."
-)
+# Private compatibility for callers that imported the old STEP-specific name.
+STEP_MULTI_INPUT_MSG = CAD_MULTI_INPUT_MSG
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -54,13 +53,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "inputs",
         nargs="+",
         type=Path,
-        help="Input STL/OBJ files (one per link), or a single STEP (.step/.stp) assembly.",
+        help=(
+            "Input STL/OBJ files (one per link), or one CAD assembly "
+            "(.step/.stp/.iges/.igs)."
+        ),
     )
     p.add_argument("-o", "--out", type=Path, required=True, help="Output package directory.")
     p.add_argument(
         "--joints",
         type=Path,
-        help="Joints YAML config (required for STL/OBJ inputs; ignored for STEP).",
+        help="Joints YAML config (required for STL/OBJ inputs; ignored for CAD assemblies).",
     )
     p.add_argument(
         "--robot-name",
@@ -105,12 +107,10 @@ def _load_mesh_to_link(
     collision_dir.mkdir(parents=True, exist_ok=True)
 
     suffix = inp.suffix.lower()
-    if suffix in {".step", ".stp"}:
-        # STEP is handled by the dedicated single-input STEP route in main(); reaching
+    if suffix in CAD_ASSEMBLY_SUFFIXES:
+        # CAD is handled by the dedicated single-input route in main(); reaching
         # here means it was mixed with other meshes, which is unsupported.
-        raise ValueError(STEP_MULTI_INPUT_MSG)
-    if suffix in {".iges", ".igs"}:
-        raise ValueError(IGES_NOT_SUPPORTED_MSG)
+        raise ValueError(CAD_MULTI_INPUT_MSG)
 
     name = inp.stem
     if suffix == ".stl":
@@ -139,8 +139,8 @@ def _load_mesh_to_link(
     return link, visual_stl
 
 
-def _build_step_robot(inp: Path, out_dir: Path, robot_name: str) -> Robot:
-    """Import a STEP assembly into a Robot wired for the package emit/scaffold flow.
+def _build_cad_robot(inp: Path, out_dir: Path, robot_name: str) -> Robot:
+    """Import a STEP/IGES assembly into the package emit/scaffold flow.
 
     `build_robot_from_tree` writes per-part STLs with *absolute* visual/collision
     paths; the emitter requires *package-relative* paths (`package://` URIs). We
@@ -153,19 +153,39 @@ def _build_step_robot(inp: Path, out_dir: Path, robot_name: str) -> Robot:
         from cad2urdf.core.extract.build_robot import build_robot_from_tree
         from cad2urdf.core.extract.mate_classify import classify_default_fixed
         from cad2urdf.core.extract.spanning_tree import build_spanning_tree
-        from cad2urdf.core.parsers.step import load_step_assembly
     except ImportError as e:  # pragma: no cover - exercised only without OCP
         raise ValueError(
-            "STEP import requires OCP. Install it with: pip install -e '.[step]'"
+            "CAD import requires OCP. Install it with: pip install -e '.[step]'"
         ) from e
+
+    suffix = inp.suffix.lower()
+    if suffix in {".step", ".stp"}:
+        from cad2urdf.core.parsers.step import load_step_assembly
+
+        loader = load_step_assembly
+    elif suffix in {".iges", ".igs"}:
+        from cad2urdf.core.parsers.iges import load_iges_assembly
+
+        loader = load_iges_assembly
+    else:
+        raise ValueError(f"unsupported CAD assembly format: {inp.suffix!r}")
 
     visual_dir = out_dir / "meshes" / "visual"
     collision_dir = out_dir / "meshes" / "collision"
     visual_dir.mkdir(parents=True, exist_ok=True)
     collision_dir.mkdir(parents=True, exist_ok=True)
 
-    asm = load_step_assembly(inp)
-    tree = build_spanning_tree(classify_default_fixed(asm.edges), base_id=asm.root_id)
+    try:
+        asm = loader(inp)
+    except ImportError as e:  # pragma: no cover - exercised only without OCP
+        raise ValueError(
+            "CAD import requires OCP. Install it with: pip install -e '.[step]'"
+        ) from e
+    tree = (
+        build_spanning_tree(classify_default_fixed(asm.edges), base_id=asm.root_id)
+        if asm.edges
+        else []
+    )
     raw = build_robot_from_tree(
         parts=asm.parts,
         tree=tree,
@@ -196,6 +216,11 @@ def _build_step_robot(inp: Path, out_dir: Path, robot_name: str) -> Robot:
         links[link.name] = _populate_inertia(rel_link, abs_visual)
 
     return Robot(name=raw.name, base_link=raw.base_link, links=links, joints=raw.joints)
+
+
+def _build_step_robot(inp: Path, out_dir: Path, robot_name: str) -> Robot:
+    """Compatibility wrapper for the former STEP-specific private helper."""
+    return _build_cad_robot(inp, out_dir, robot_name)
 
 
 def _build_joints(cfg: JointsConfig) -> dict[str, Joint]:
@@ -258,12 +283,16 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
 
-    is_step = (
-        len(args.inputs) == 1 and args.inputs[0].suffix.lower() in {".step", ".stp"}
-    )
+    cad_inputs = [
+        path for path in args.inputs if path.suffix.lower() in CAD_ASSEMBLY_SUFFIXES
+    ]
+    is_cad_assembly = len(args.inputs) == 1 and len(cad_inputs) == 1
+    if cad_inputs and not is_cad_assembly:
+        print(f"error: {CAD_MULTI_INPUT_MSG}", file=sys.stderr)
+        return 2
 
     cfg: JointsConfig | None = None
-    if not is_step:
+    if not is_cad_assembly:
         if args.joints is None:
             print("error: --joints is required for STL/OBJ inputs", file=sys.stderr)
             return 2
@@ -304,20 +333,20 @@ def main(argv: list[str] | None = None) -> int:
         args.out.mkdir(parents=True, exist_ok=True)
         write_started = True
 
-        if is_step:
-            # STEP path: a single assembly produces the whole Robot (links + joints).
-            # _build_step_robot writes per-part STLs into the package and returns a
+        if is_cad_assembly:
+            # CAD path: a single assembly produces the whole Robot (links + joints).
+            # _build_cad_robot writes per-part STLs into the package and returns a
             # Robot with package-relative mesh paths + baked inertia, ready to emit.
             robot_name = args.robot_name or args.inputs[0].stem
             try:
-                robot_final = _build_step_robot(args.inputs[0], args.out, robot_name)
+                robot_final = _build_cad_robot(args.inputs[0], args.out, robot_name)
             except (ValueError, FileNotFoundError) as e:
                 print(f"error: {e}", file=sys.stderr)
                 _cleanup_on_error()
                 return 2
             base_link = robot_final.base_link
         else:
-            assert cfg is not None  # guaranteed by the is_step branch above
+            assert cfg is not None  # guaranteed by the CAD assembly branch above
             # Phase 1: load each mesh, write into the package, build Link records (relative paths).
             rel_links: dict[str, Link] = {}
             abs_paths: dict[str, Path] = {}

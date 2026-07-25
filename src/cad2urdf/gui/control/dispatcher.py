@@ -25,6 +25,7 @@ from cad2urdf.gui.control import protocol
 from cad2urdf.gui.state.controller import RobotController
 from cad2urdf.gui.workers.export_package import build_export_job
 from cad2urdf.gui.workers.import_meshes import build_import_job
+from cad2urdf.gui.workers.step_import import build_cad_import_job
 from cad2urdf.gui.workers.validate import build_validate_job
 
 _log = logging.getLogger(__name__)
@@ -91,6 +92,17 @@ class CommandDispatcher:
         robot_name = args.get("robot_name", "robot")
         job = build_import_job(paths=paths, robot_name=robot_name)
         robot = job(lambda c, t, m: None)  # run synchronously on the Qt thread
+        self._controller.replace(robot)
+        return robot_to_payload(self._controller.current())
+
+    def _cmd_import_cad(self, args: dict[str, Any]) -> dict[str, Any]:
+        import tempfile
+
+        path = Path(args["path"])
+        robot_name = args.get("robot_name", path.stem)
+        mesh_dir = Path(tempfile.mkdtemp(prefix="cad2urdf_cad_"))
+        job = build_cad_import_job(path=path, mesh_dir=mesh_dir, robot_name=robot_name)
+        robot = job(lambda _c, _t, _m: None)
         self._controller.replace(robot)
         return robot_to_payload(self._controller.current())
 

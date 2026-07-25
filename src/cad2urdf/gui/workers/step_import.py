@@ -1,4 +1,4 @@
-"""Worker job: STEP file -> Robot (XCAF assembly pipeline)."""
+"""Worker job: STEP/IGES file -> Robot (XCAF assembly pipeline)."""
 
 from __future__ import annotations
 
@@ -10,24 +10,38 @@ from cad2urdf.core.extract.mate_classify import classify_default_fixed
 from cad2urdf.core.extract.spanning_tree import build_spanning_tree
 from cad2urdf.core.inertia.materials import lookup
 from cad2urdf.core.kinematic.model import Robot
-from cad2urdf.core.parsers.step import load_step_assembly
 
 
-def build_step_import_job(
+def build_cad_import_job(
     *, path: Path, mesh_dir: Path, robot_name: str
 ) -> Callable[[Callable[[int, int, str], None]], Robot]:
     """Return a job suitable for `Worker(job).start()`.
 
-    The job reads a STEP assembly, builds a spanning tree of fixed joints, and
+    The job reads a CAD assembly, builds a spanning tree of fixed joints, and
     assembles a Robot writing per-part STLs into `mesh_dir`. Progress is reported
     once per stage.
     """
+    suffix = path.suffix.lower()
+    if suffix in {".step", ".stp"}:
+        from cad2urdf.core.parsers.step import load_step_assembly
+
+        loader = load_step_assembly
+    elif suffix in {".iges", ".igs"}:
+        from cad2urdf.core.parsers.iges import load_iges_assembly
+
+        loader = load_iges_assembly
+    else:
+        raise ValueError(f"unsupported CAD assembly format: {path.suffix!r}")
 
     def job(report: Callable[[int, int, str], None]) -> Robot:
         report(1, 3, f"reading {path.name}")
-        asm = load_step_assembly(path)
+        asm = loader(path)
         report(2, 3, "building tree")
-        tree = build_spanning_tree(classify_default_fixed(asm.edges), base_id=asm.root_id)
+        tree = (
+            build_spanning_tree(classify_default_fixed(asm.edges), base_id=asm.root_id)
+            if asm.edges
+            else []
+        )
         report(3, 3, "assembling robot")
         return build_robot_from_tree(
             parts=asm.parts,
@@ -39,3 +53,7 @@ def build_step_import_job(
         )
 
     return job
+
+
+# Compatibility for existing callers while the public surface moves to CAD.
+build_step_import_job = build_cad_import_job

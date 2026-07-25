@@ -106,6 +106,12 @@ def import_meshes(paths: list[str], robot_name: str = "robot") -> Any:
 
 
 @mcp.tool()
+def import_cad(path: str) -> Any:
+    """Import one STEP/IGES assembly as a fresh robot document."""
+    return bridge.call("import_cad", {"path": path})
+
+
+@mcp.tool()
 def set_base_link(link: str) -> Any:
     """Re-root the kinematic tree at the given link."""
     return bridge.call("set_base_link", {"link": link})

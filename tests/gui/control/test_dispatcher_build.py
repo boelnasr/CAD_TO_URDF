@@ -1,3 +1,6 @@
+from dataclasses import replace
+from pathlib import Path
+
 import pytest
 import trimesh
 
@@ -67,3 +70,35 @@ def test_set_base_link(dispatcher, two_meshes):
 def test_import_rejects_missing_args(dispatcher):
     resp = dispatcher.dispatch({"command": "import_meshes", "args": {}})
     assert resp["ok"] is False
+
+
+def test_import_cad_replaces_document_and_clears_history(
+    monkeypatch: pytest.MonkeyPatch, qapp, tmp_path: Path
+) -> None:
+    """Using controller.apply would make a fresh CAD document incorrectly undoable."""
+    controller = RobotController()
+    controller.apply(lambda robot: replace(robot, name="edited"), label="edit")
+    assert controller.can_undo()
+
+    def fake_builder(*, path: Path, mesh_dir: Path, robot_name: str):
+        assert path == tmp_path / "robot.iges"
+        assert mesh_dir.is_dir()
+        return lambda _report: replace(controller.current(), name=robot_name)
+
+    monkeypatch.setattr(
+        "cad2urdf.gui.control.dispatcher.build_cad_import_job", fake_builder
+    )
+    dispatcher = CommandDispatcher(controller)
+
+    response = dispatcher.dispatch(
+        {
+            "command": "import_cad",
+            "args": {"path": str(tmp_path / "robot.iges"), "robot_name": "fresh"},
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["result"]["name"] == "fresh"
+    assert controller.current().name == "fresh"
+    assert not controller.can_undo()
+    assert not controller.can_redo()
