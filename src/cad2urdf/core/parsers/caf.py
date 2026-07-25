@@ -1,7 +1,12 @@
-"""Shared XCAF assembly walking and B-rep tessellation helpers.
+"""Shared XCAF assembly walking and transient B-rep tessellation helpers.
 
 OCP is intentionally imported only inside function bodies, keeping the core
 parser package importable without the optional CAD dependency installed.
+
+``load_caf_assembly`` returns B-reps only in its side map.  Consumers must use
+that map for immediate inference, then discard it before creating or retaining
+Robot, controller, project, or socket state.  B-reps are deliberately absent
+from the serializable ``StepAssembly`` AST.
 """
 
 from __future__ import annotations
@@ -113,15 +118,16 @@ def load_caf_assembly(
     """Load an XCAF-backed CAD assembly and leaf B-reps using ``reader_factory``.
 
     The returned shape map is transient and keyed solely by leaf ``StepPart.id``
-    values.  It lets consumers needing B-rep topology retain it without changing
-    the mesh-centric ``StepAssembly`` contract.
+    values.  It is non-serializable and intended solely for immediate joint
+    inference; discard it before building a ``Robot`` or crossing a process/UI
+    boundary.  The XCAF document exists only in this function's scope, so the
+    map is the only OCP state that escapes the parser.
     """
     try:
         from OCP.IFSelect import IFSelect_RetDone
         from OCP.TCollection import TCollection_ExtendedString
         from OCP.TDF import TDF_Label, TDF_LabelSequence
         from OCP.TDocStd import TDocStd_Document
-        from OCP.XCAFApp import XCAFApp_Application
         from OCP.XCAFDoc import XCAFDoc_DocumentTool
     except ImportError as e:  # pragma: no cover - exercised only without OCP
         raise ImportError(_OCP_HINT) from e
@@ -129,9 +135,8 @@ def load_caf_assembly(
     if not path.is_file():
         raise FileNotFoundError(f"CAD file not found: {path}")
 
-    app = XCAFApp_Application.GetApplication_s()
     doc = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
-    app.NewDocument(TCollection_ExtendedString("MDTV-XCAF"), doc)
+    XCAFDoc_DocumentTool.Set_s(doc.Main())
     reader = reader_factory()
     if reader.ReadFile(str(path)) != IFSelect_RetDone:
         raise ValueError(f"failed to read CAD file: {path}")
@@ -188,4 +193,6 @@ def load_caf_assembly(
     if free.Length() == 0:
         raise ValueError(f"CAD file has no shapes: {path}")
     root_id = visit(free.Value(1))
-    return StepAssembly(parts=parts, edges=edges, root_id=root_id), shapes
+    assembly = StepAssembly(parts=parts, edges=edges, root_id=root_id)
+    del doc
+    return assembly, shapes
