@@ -377,3 +377,129 @@ Result: `Success: no issues found in 65 source files`
   project JSON, or MCP/socket payloads; the transient CAF shape map remains
   unrelated and discarded.
 - Scope: no joint inference, release metadata, project schema, or plan changes.
+
+---
+
+## Fix round 2/5 — FIFO control dispatch and shutdown-safe pending leases
+
+### Review findings addressed
+
+1. `ControlServer` now serializes complete request lines through one explicit
+   FIFO. While a dispatch is active, nested `readyRead` callbacks may read and
+   enqueue later commands but cannot dispatch them. The server writes the
+   current response before draining the next request, preserving documented
+   pipelining and controller state order.
+2. After writing a response, the drain polls `bytesAvailable()` on live
+   connections. This is necessary because Qt may coalesce a `readyRead` emitted
+   during the nested event loop; without the poll, bytes can remain unread after
+   the original dispatch returns.
+3. Generated CAD directories now act as pending job leases during shutdown.
+   `CadAssetOwner.close()` marks the owner closing and retires active assets, but
+   leaves pending directories in place. When the worker returns, controller
+   adoption is rejected, the pending lease is discarded, and final owner-root
+   cleanup completes. New allocations/replacements are rejected after shutdown.
+4. The behavior is covered through both the blocking MCP adapter path and the
+   GUI/window-close path. In both tests the worker writes successfully after
+   shutdown was requested, proving no use-after-delete.
+
+### Files changed in this fix round
+
+- `src/cad2urdf/gui/control/server.py`
+- `src/cad2urdf/gui/state/cad_assets.py`
+- `src/cad2urdf/gui/state/controller.py`
+- `tests/gui/control/test_server.py`
+- `tests/gui/control/test_dispatcher_build.py`
+- `tests/gui/test_import_dialog.py`
+
+### Strict TDD evidence
+
+Primary RED:
+
+```bash
+env -u PYTHONPATH -u AMENT_PREFIX_PATH \
+  QT_QPA_PLATFORM=offscreen PYVISTA_OFF_SCREEN=true \
+  VTK_DEFAULT_OPENGL_WINDOW=vtkOSOpenGLRenderWindow \
+  .venv/bin/pytest \
+  tests/gui/control/test_server.py::test_pipelined_command_waits_for_blocked_import_and_preserves_response_order \
+  tests/gui/control/test_dispatcher_build.py::test_dispatcher_shutdown_defers_pending_cleanup_until_worker_stops \
+  tests/gui/test_import_dialog.py::test_window_close_defers_pending_cleanup_until_gui_worker_stops \
+  -q -ra
+```
+
+Result before production changes: **3 failed**.
+
+- the real socket client did not receive the ordered two-response sequence
+- dispatcher shutdown deleted the pending tree and the worker failed writing
+  `finished.stl` with `FileNotFoundError`
+- window close caused the same use-after-delete failure in the GUI path
+
+First queue iteration: **2 passed, 1 failed**. Shutdown coordination was fixed,
+but the socket test received only the import response. This proved that merely
+gating nested dispatch can strand coalesced unread `QLocalSocket` bytes.
+
+Final GREEN after adding the post-response `bytesAvailable()` collection: the
+same command completed with **3 passed**.
+
+### Focused and full verification
+
+Focused regression gate:
+
+```bash
+env -u PYTHONPATH -u AMENT_PREFIX_PATH \
+  QT_QPA_PLATFORM=offscreen PYVISTA_OFF_SCREEN=true \
+  VTK_DEFAULT_OPENGL_WINDOW=vtkOSOpenGLRenderWindow \
+  .venv/bin/pytest \
+  tests/gui/control/test_server.py \
+  tests/gui/control/test_dispatcher_build.py \
+  tests/gui/control/test_dispatcher_project.py \
+  tests/gui/test_import_dialog.py \
+  tests/gui/test_cad_asset_owner.py \
+  tests/gui/test_main_window.py \
+  tests/gui/test_worker_base.py \
+  tests/unit/test_import_cad_wiring.py -q -ra
+```
+
+Result: **37 passed**.
+
+Full suite:
+
+```bash
+env -u PYTHONPATH -u AMENT_PREFIX_PATH \
+  QT_QPA_PLATFORM=offscreen PYVISTA_OFF_SCREEN=true \
+  VTK_DEFAULT_OPENGL_WINDOW=vtkOSOpenGLRenderWindow \
+  .venv/bin/pytest -q -ra
+```
+
+Result: **339 passed, 1 skipped**. The skip remains the optional ManipulaPy
+dependency.
+
+```bash
+env -u PYTHONPATH -u AMENT_PREFIX_PATH .venv/bin/ruff check .
+```
+
+Result: `All checks passed!`
+
+```bash
+env -u PYTHONPATH -u AMENT_PREFIX_PATH \
+  .venv/bin/mypy src/cad2urdf/core src/cad2urdf/gui src/cad2urdf/mcp
+```
+
+Result: `Success: no issues found in 65 source files`
+
+### Fix-round self-review
+
+- Real boundary test: the pipelining test uses a real Unix socket client and
+  `QLocalServer`, sends `rename_link` only after the import worker has blocked,
+  and asserts both wire response order and final controller state.
+- No stranded input: complete lines already read are FIFO queued; data that
+  arrived during nested dispatch is explicitly collected after the current
+  response, before the next dispatch.
+- Disconnect safety: queued requests for connections no longer present in the
+  live buffer map are skipped, and `stop()` clears both buffers and the queue.
+- Shutdown safety: active assets can retire immediately, but pending assets
+  remain until their worker returns. Both GUI and MCP tests perform a real file
+  write after close/shutdown, then assert final cleanup.
+- Ownership safety is unchanged: only directories allocated and tracked by
+  `CadAssetOwner` can enter the pending/active lifecycle.
+- Protocol surface, synchronous response envelopes, Task 2 parser/CLI behavior,
+  and Task 4/release scope remain unchanged.

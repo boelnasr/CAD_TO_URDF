@@ -40,6 +40,7 @@ class RobotController(QObject):
         self._undo: list[_HistoryEntry] = []
         self._redo: list[_HistoryEntry] = []
         self._cad_assets = cad_assets or CadAssetOwner()
+        self._shutdown = False
 
     # ---- query --------------------------------------------------------------
     def current(self) -> Robot:
@@ -57,6 +58,7 @@ class RobotController(QObject):
 
         Clears the undo history because the new AST is a fresh document.
         """
+        self._ensure_running()
         self._replace_robot(robot)
         # Signals are synchronous on the controller's Qt thread. Retire the
         # previous CAD tree only after views have observed the new document.
@@ -72,6 +74,7 @@ class RobotController(QObject):
 
     def create_cad_import_dir(self) -> Path:
         """Allocate a generated mesh directory owned by this session."""
+        self._ensure_running()
         return self._cad_assets.allocate()
 
     def discard_cad_import_dir(self, path: Path) -> None:
@@ -85,12 +88,20 @@ class RobotController(QObject):
         assets are deleted only after the new Robot has been emitted to views.
         """
         normalized = self._cad_assets.validate_pending(asset_dir)
+        if self._shutdown:
+            self._cad_assets.discard(normalized)
+            raise RuntimeError("RobotController is shutting down")
         self._replace_robot(robot)
         self._cad_assets.activate(normalized)
 
     def shutdown(self) -> None:
         """Release all generated CAD assets owned by this controller session."""
+        self._shutdown = True
         self._cad_assets.close()
+
+    def _ensure_running(self) -> None:
+        if self._shutdown:
+            raise RuntimeError("RobotController is shutting down")
 
     def apply(self, transform: RobotTransform, *, label: str) -> None:
         """Apply a pure Robot->Robot transform and remember it for undo.

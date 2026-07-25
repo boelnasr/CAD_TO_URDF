@@ -27,9 +27,12 @@ class CadAssetOwner:
         self._root = root.resolve()
         self._pending: set[Path] = set()
         self._active: Path | None = None
+        self._closing = False
 
     def allocate(self) -> Path:
         """Create and track a pending per-import directory."""
+        if self._closing:
+            raise RuntimeError("CAD asset owner is shutting down")
         path = Path(tempfile.mkdtemp(prefix="import_", dir=self._root)).resolve()
         self._pending.add(path)
         return path
@@ -44,6 +47,9 @@ class CadAssetOwner:
     def activate(self, path: Path) -> None:
         """Make a pending directory active, then retire the prior active tree."""
         normalized = self.validate_pending(path)
+        if self._closing:
+            self.discard(normalized)
+            raise RuntimeError("CAD asset owner is shutting down")
         previous = self._active
         self._pending.remove(normalized)
         self._active = normalized
@@ -57,6 +63,7 @@ class CadAssetOwner:
             return
         self._pending.remove(normalized)
         self._remove(normalized)
+        self._finish_close()
 
     def retire_active(self) -> None:
         """Remove the current document's generated assets, if any."""
@@ -66,11 +73,13 @@ class CadAssetOwner:
             self._remove(previous)
 
     def close(self) -> None:
-        """Remove every active or pending directory owned by this session."""
+        """Begin shutdown, deferring pending cleanup until their jobs finish."""
+        self._closing = True
         self.retire_active()
-        for path in list(self._pending):
-            self.discard(path)
-        if self._owns_root:
+        self._finish_close()
+
+    def _finish_close(self) -> None:
+        if self._closing and not self._pending and self._owns_root:
             self._remove(self._root)
 
     @staticmethod

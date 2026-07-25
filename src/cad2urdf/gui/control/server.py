@@ -8,6 +8,7 @@ may pipeline multiple commands; partial lines are buffered per connection.
 from __future__ import annotations
 
 import logging
+from collections import deque
 
 from PyQt6.QtCore import QObject
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
@@ -32,6 +33,8 @@ class ControlServer(QObject):
         self._socket_name = socket_name
         self._server = QLocalServer(self)
         self._buffers: dict[QLocalSocket, bytes] = {}
+        self._pending: deque[tuple[QLocalSocket, bytes]] = deque()
+        self._dispatching = False
         self._server.newConnection.connect(self._on_new_connection)
 
     def start(self) -> None:
@@ -48,6 +51,7 @@ class ControlServer(QObject):
         for conn in list(self._buffers):
             conn.disconnectFromServer()
         self._buffers.clear()
+        self._pending.clear()
         self._server.close()
         QLocalServer.removeServer(self._socket_name)
 
@@ -67,18 +71,41 @@ class ControlServer(QObject):
     def _on_ready_read(self, conn: QLocalSocket) -> None:
         if conn not in self._buffers:
             return
+        self._collect_available(conn)
+        self._drain_pending()
+
+    def _collect_available(self, conn: QLocalSocket) -> None:
+        """Read all currently available bytes and enqueue every complete line."""
         self._buffers[conn] += bytes(conn.readAll())
         while b"\n" in self._buffers[conn]:
             raw, _, rest = self._buffers[conn].partition(b"\n")
             self._buffers[conn] = rest
-            self._handle_line(conn, raw)
+            self._pending.append((conn, raw))
 
-    def _handle_line(self, conn: QLocalSocket, raw: bytes) -> None:
+    def _drain_pending(self) -> None:
+        """Dispatch complete requests FIFO, without nested-loop reentrancy."""
+        if self._dispatching:
+            return
+        self._dispatching = True
+        try:
+            while self._pending:
+                conn, raw = self._pending.popleft()
+                if conn not in self._buffers:
+                    continue
+                response = self._response_for(raw)
+                conn.write(protocol.encode(response).encode("utf-8"))
+                conn.flush()
+                # A nested event loop may coalesce readyRead while this slot is
+                # active. Poll after the response so those bytes cannot strand.
+                for open_conn in list(self._buffers):
+                    if open_conn.bytesAvailable():
+                        self._collect_available(open_conn)
+        finally:
+            self._dispatching = False
+
+    def _response_for(self, raw: bytes) -> dict[str, object]:
         try:
             message = protocol.decode(raw.decode("utf-8"))
         except (protocol.ProtocolError, UnicodeDecodeError) as e:
-            response = protocol.err("protocol_error", str(e))
-        else:
-            response = self._dispatcher.dispatch(message)
-        conn.write(protocol.encode(response).encode("utf-8"))
-        conn.flush()
+            return protocol.err("protocol_error", str(e))
+        return self._dispatcher.dispatch(message)
