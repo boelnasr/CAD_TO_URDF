@@ -458,7 +458,7 @@ can produce a moving joint:
 flowchart TD
     A["STEP/IGES parts + poses<br/>transient B-rep side map"] --> B["compare shaped sibling bodies<br/>in common assembly frame"]
     B --> C{"unambiguous geometry?"}
-    C -->|"coaxial cylinders"| E["continuous"]
+    C -->|"centered coaxial cylinders"| E["continuous"]
     C -->|"bilaterally enclosed<br/>rectangular planar guide"| G["prismatic<br/>measured travel or ±0.1 m fallback"]
     C -->|"ambiguous / unsupported"| H["fixed"]
     E --> I{"confidence ≥ 0.6?"}
@@ -469,11 +469,12 @@ flowchart TD
     J --> K["editable Robot tree"]
 ```
 
-This is deliberately conservative. Conflicting cylinder axes, one-sided or
-L-shaped contacts, oblique/nonrectangular guides, and multi-parent XCAF
-instances stay fixed. The result is an editable hypothesis, not proof of the
-mechanism's degrees of freedom: confirm joint type, parent/child relationship,
-axis, origin, and limits before simulation or hardware use.
+This is deliberately conservative. Off-origin coaxial axes, conflicting
+cylinder axes, one-sided or L-shaped contacts, oblique/nonrectangular guides,
+and multi-parent XCAF instances stay fixed. The result is an editable
+hypothesis, not proof of the mechanism's degrees of freedom: confirm joint
+type, parent/child relationship, axis, origin, and limits before simulation or
+hardware use.
 
 ### Inertia computation — `core/inertia/compute.py`
 

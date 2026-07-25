@@ -50,7 +50,7 @@ def test_empty_edge_list_with_unknown_base_raises() -> None:
         build_spanning_tree([], base_id="a")
 
 
-def test_reversed_edge_inverts_pose_and_negates_axis() -> None:
+def test_reversed_continuous_edge_inverts_pose_and_negates_axis() -> None:
     # Single edge p -> c with translation [1, 0, 0] along axis [1, 0, 0].
     # Build BFS rooted at c (the natural child) — the edge must reverse.
     pose = np.eye(4)
@@ -59,7 +59,7 @@ def test_reversed_edge_inverts_pose_and_negates_axis() -> None:
     edge = ClassifiedJoint(
         parent_id="p",
         child_id="c",
-        joint_type="revolute",
+        joint_type="continuous",
         axis=np.array([1.0, 0.0, 0.0]),
         relative_pose=pose,
     )
@@ -68,6 +68,9 @@ def test_reversed_edge_inverts_pose_and_negates_axis() -> None:
     e = out[0]
     assert e.parent_id == "c"
     assert e.child_id == "p"
+    assert e.joint_type == "continuous"
+    assert e.limit_lower is None
+    assert e.limit_upper is None
     # Inverted pose: parent is now at [-1, 0, 0] relative to child.
     expected_inv = np.eye(4)
     expected_inv[0, 3] = -1.0

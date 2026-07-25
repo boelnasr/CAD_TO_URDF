@@ -36,8 +36,8 @@ follows [Semantic Versioning](https://semver.org/).
   hypotheses fall back to fixed.
 - Inference is advisory and should be reviewed in the Joint Editor before
   simulation or hardware use.
-- Oblique/nonrectangular guides, conflicting cylinder axes, and multi-parent
-  XCAF instances remain fixed.
+- Off-origin coaxial axes, oblique/nonrectangular guides, conflicting cylinder
+  axes, and multi-parent XCAF instances remain fixed.
 - CAD-import tessellations live in a session temporary directory that expires
   when the document is replaced or the GUI exits. Schema-v1 project files only
   store paths to those meshes, so CAD-import projects are not durably reopenable

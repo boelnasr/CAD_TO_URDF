@@ -295,7 +295,17 @@ def _axis_lines_compatible(first: _AxisLine, second: _AxisLine) -> bool:
     return line_distance <= LINEAR_TOLERANCE_M
 
 
-def _concentric_axis(parent: _Geometry, child: _Geometry) -> tuple[NDArray[Any], float] | None:
+def _point_line_distance(point: NDArray[Any], line: _AxisLine) -> float:
+    return float(np.linalg.norm(np.cross(point - line.point, line.direction)))
+
+
+def _concentric_axis(
+    parent: _Geometry,
+    child: _Geometry,
+    *,
+    parent_origin: NDArray[Any],
+    child_origin: NDArray[Any],
+) -> tuple[NDArray[Any], float] | None:
     candidates: list[_ConcentricCandidate] = []
     for left in parent.cylinders:
         for right in child.cylinders:
@@ -311,6 +321,11 @@ def _concentric_axis(parent: _Geometry, child: _Geometry) -> tuple[NDArray[Any],
             if axis_error > LINEAR_TOLERANCE_M:
                 continue
             axis = _canonical_direction(left.direction)
+            parent_axis = _AxisLine(point=left.point, direction=axis)
+            child_axis = _AxisLine(
+                point=right.point,
+                direction=_canonical_direction(right.direction),
+            )
             left_low, left_high = _cylinder_interval(left, axis)
             right_low, right_high = _cylinder_interval(right, axis)
             axial_overlap = min(left_high, right_high) - max(left_low, right_low)
@@ -325,11 +340,8 @@ def _concentric_axis(parent: _Geometry, child: _Geometry) -> tuple[NDArray[Any],
             )
             candidates.append(
                 _ConcentricCandidate(
-                    parent_axis=_AxisLine(point=left.point, direction=axis),
-                    child_axis=_AxisLine(
-                        point=right.point,
-                        direction=_canonical_direction(right.direction),
-                    ),
+                    parent_axis=parent_axis,
+                    child_axis=child_axis,
                     confidence=constraint_score,
                 )
             )
@@ -348,7 +360,21 @@ def _concentric_axis(parent: _Geometry, child: _Geometry) -> tuple[NDArray[Any],
         ):
             return None
 
-    best = max(candidates, key=lambda candidate: candidate.confidence)
+    # Assembly edges currently carry only a direction, not an axis-line point.
+    # Keep all candidates through the ambiguity check above, then retain only
+    # lines safe under either forest orientation. Filtering earlier could hide
+    # a conflicting off-origin cylinder and incorrectly bless another line.
+    safe_candidates = [
+        candidate
+        for candidate in candidates
+        if _point_line_distance(parent_origin, candidate.parent_axis)
+        <= LINEAR_TOLERANCE_M
+        and _point_line_distance(child_origin, candidate.child_axis)
+        <= LINEAR_TOLERANCE_M
+    ]
+    if not safe_candidates:
+        return None
+    best = max(safe_candidates, key=lambda candidate: candidate.confidence)
     return best.parent_axis.direction, best.confidence
 
 
@@ -431,9 +457,14 @@ def _infer_pair(
 ) -> AssemblyEdge:
     parent = _extract_geometry(parent_shape, unit_scale=unit_scale)
     child_local = _extract_geometry(child_shape, unit_scale=unit_scale)
-    child = _transform_geometry(child_local, np.asarray(edge.relative_pose, dtype=float))
-
-    concentric = _concentric_axis(parent, child)
+    pose = np.asarray(edge.relative_pose, dtype=float)
+    child = _transform_geometry(child_local, pose)
+    concentric = _concentric_axis(
+        parent,
+        child,
+        parent_origin=np.zeros(3),
+        child_origin=pose[:3, 3],
+    )
     if concentric is not None:
         axis, confidence = concentric
         return replace(

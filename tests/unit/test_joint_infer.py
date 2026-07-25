@@ -55,6 +55,33 @@ def test_real_coaxial_cylindrical_faces_infer_parent_frame_axis() -> None:
     assert classified[0].limit_upper is None
 
 
+def test_off_origin_coaxial_cylinders_stay_fixed_and_keep_axis_point() -> None:
+    """Direction-only inference would rotate around the wrong parallel line."""
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+
+    shared_axis = gp_Ax2(
+        gp_Pnt(0.0, 10.0, 0.0),
+        gp_Dir(0.0, 0.0, 1.0),
+    )
+    outer = BRepPrimAPI_MakeCylinder(20.0, 30.0).Shape()
+    bore = BRepPrimAPI_MakeCylinder(shared_axis, 5.0, 30.0).Shape()
+    parent = BRepAlgoAPI_Cut(outer, bore).Shape()
+    child = BRepPrimAPI_MakeCylinder(shared_axis, 5.0, 20.0).Shape()
+    edge = _edge()
+
+    inferred = infer_edge_hints([edge], {"parent": parent, "child": child})
+    classified = classify_from_hints(inferred)
+
+    assert inferred[0].confidence < 0.6
+    assert classified[0].joint_type == "fixed"
+    true_axis_point = np.array([0.0, 0.01, 0.0, 1.0])
+    assert classified[0].relative_pose @ true_axis_point == pytest.approx(
+        true_axis_point
+    )
+
+
 def test_diagonal_coaxial_cylinders_with_disjoint_axial_intervals_stay_fixed() -> None:
     from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
