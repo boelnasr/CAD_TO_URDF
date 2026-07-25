@@ -42,7 +42,8 @@ class _Cylinder:
     point: NDArray[Any]
     direction: NDArray[Any]
     radius: float
-    bounds: _Bounds
+    axial_low: float
+    axial_high: float
 
 
 @dataclass(frozen=True)
@@ -50,12 +51,15 @@ class _Plane:
     point: NDArray[Any]
     normal: NDArray[Any]
     bounds: _Bounds
+    vertices: NDArray[Any]
+    has_four_linear_edges: bool
 
 
 @dataclass(frozen=True)
 class _ContactDirection:
     direction: NDArray[Any]
     face_pairs: tuple[tuple[_Bounds, _Bounds], ...]
+    plane_offsets: tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -91,9 +95,10 @@ def _bounds_of(shape: Any, *, unit_scale: float) -> _Bounds:
 
 
 def _extract_geometry(shape: Any, *, unit_scale: float) -> _Geometry:
-    from OCP.BRepAdaptor import BRepAdaptor_Surface
-    from OCP.GeomAbs import GeomAbs_Cylinder, GeomAbs_Plane
-    from OCP.TopAbs import TopAbs_FACE
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_Cylinder, GeomAbs_Line, GeomAbs_Plane
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
     from OCP.TopExp import TopExp_Explorer
     from OCP.TopoDS import TopoDS
 
@@ -103,7 +108,6 @@ def _extract_geometry(shape: Any, *, unit_scale: float) -> _Geometry:
     while explorer.More():
         face = TopoDS.Face_s(explorer.Current())
         adaptor = BRepAdaptor_Surface(face, True)
-        bounds = _bounds_of(face, unit_scale=unit_scale)
         if adaptor.GetType() == GeomAbs_Cylinder:
             cylinder = adaptor.Cylinder()
             axis = cylinder.Axis()
@@ -112,16 +116,39 @@ def _extract_geometry(shape: Any, *, unit_scale: float) -> _Geometry:
                     point=_xyz(axis.Location()) * unit_scale,
                     direction=_unit(_xyz(axis.Direction())),
                     radius=float(cylinder.Radius()) * unit_scale,
-                    bounds=bounds,
+                    axial_low=float(adaptor.FirstVParameter()) * unit_scale,
+                    axial_high=float(adaptor.LastVParameter()) * unit_scale,
                 )
             )
         elif adaptor.GetType() == GeomAbs_Plane:
             plane = adaptor.Plane()
+            bounds = _bounds_of(face, unit_scale=unit_scale)
+            vertices: list[NDArray[Any]] = []
+            vertex_explorer = TopExp_Explorer(face, TopAbs_VERTEX)
+            while vertex_explorer.More():
+                vertex = TopoDS.Vertex_s(vertex_explorer.Current())
+                point = _xyz(BRep_Tool.Pnt_s(vertex)) * unit_scale
+                if not any(
+                    np.allclose(point, known, atol=LINEAR_TOLERANCE_M * 0.1)
+                    for known in vertices
+                ):
+                    vertices.append(point)
+                vertex_explorer.Next()
+            edge_count = 0
+            all_edges_linear = True
+            edge_explorer = TopExp_Explorer(face, TopAbs_EDGE)
+            while edge_explorer.More():
+                edge_count += 1
+                curve = BRepAdaptor_Curve(TopoDS.Edge_s(edge_explorer.Current()))
+                all_edges_linear = all_edges_linear and curve.GetType() == GeomAbs_Line
+                edge_explorer.Next()
             planes.append(
                 _Plane(
                     point=_xyz(plane.Location()) * unit_scale,
                     normal=_unit(_xyz(plane.Axis().Direction())),
                     bounds=bounds,
+                    vertices=np.asarray(vertices, dtype=float),
+                    has_four_linear_edges=all_edges_linear and edge_count == 4,
                 )
             )
         explorer.Next()
@@ -165,7 +192,8 @@ def _transform_geometry(geometry: _Geometry, pose: NDArray[Any]) -> _Geometry:
                 point=rotation @ item.point + offset,
                 direction=_unit(rotation @ item.direction),
                 radius=item.radius,
-                bounds=_transform_bounds(item.bounds, rotation, offset),
+                axial_low=item.axial_low,
+                axial_high=item.axial_high,
             )
             for item in geometry.cylinders
         ),
@@ -174,6 +202,8 @@ def _transform_geometry(geometry: _Geometry, pose: NDArray[Any]) -> _Geometry:
                 point=rotation @ item.point + offset,
                 normal=_unit(rotation @ item.normal),
                 bounds=_transform_bounds(item.bounds, rotation, offset),
+                vertices=(rotation @ item.vertices.T).T + offset,
+                has_four_linear_edges=item.has_four_linear_edges,
             )
             for item in geometry.planes
         ),
@@ -185,24 +215,58 @@ def _parallel(first: NDArray[Any], second: NDArray[Any]) -> bool:
     return math.acos(cosine) <= ANGULAR_TOLERANCE_RAD
 
 
-def _bounds_overlap(first: _Bounds, second: _Bounds) -> bool:
-    return bool(
-        np.all(
-            np.minimum(first.high, second.high) + LINEAR_TOLERANCE_M
-            >= np.maximum(first.low, second.low)
-        )
+def _axis_aligned_rectangle(plane: _Plane) -> bool:
+    if not plane.has_four_linear_edges or plane.vertices.shape != (4, 3):
+        return False
+    normal_axis = int(np.argmax(np.abs(plane.normal)))
+    if abs(float(plane.normal[normal_axis])) < math.cos(ANGULAR_TOLERANCE_RAD):
+        return False
+    tangent_axes = [axis for axis in range(3) if axis != normal_axis]
+    corner_pairs: set[tuple[int, int]] = set()
+    for vertex in plane.vertices:
+        pair: list[int] = []
+        for axis in tangent_axes:
+            low_error = abs(float(vertex[axis] - plane.bounds.low[axis]))
+            high_error = abs(float(vertex[axis] - plane.bounds.high[axis]))
+            if min(low_error, high_error) > LINEAR_TOLERANCE_M:
+                return False
+            pair.append(0 if low_error <= high_error else 1)
+        corner_pairs.add((pair[0], pair[1]))
+    return len(corner_pairs) == 4
+
+
+def _verified_rectangular_overlap(first: _Plane, second: _Plane) -> bool:
+    if not _axis_aligned_rectangle(first) or not _axis_aligned_rectangle(second):
+        return False
+    normal_axis = int(np.argmax(np.abs(first.normal)))
+    if normal_axis != int(np.argmax(np.abs(second.normal))):
+        return False
+    overlap = np.minimum(first.bounds.high, second.bounds.high) - np.maximum(
+        first.bounds.low, second.bounds.low
     )
-
-
-def _face_area_overlaps(first: _Bounds, second: _Bounds) -> bool:
-    overlap = np.minimum(first.high, second.high) - np.maximum(first.low, second.low)
-    return int(np.count_nonzero(overlap > LINEAR_TOLERANCE_M)) >= 2
+    return all(
+        overlap[axis] > LINEAR_TOLERANCE_M
+        for axis in range(3)
+        if axis != normal_axis
+    )
 
 
 def _canonical_direction(direction: NDArray[Any]) -> NDArray[Any]:
     out = _unit(direction)
     index = int(np.argmax(np.abs(out)))
     return -out if out[index] < 0.0 else out
+
+
+def _cylinder_interval(
+    cylinder: _Cylinder,
+    reference_axis: NDArray[Any],
+) -> tuple[float, float]:
+    endpoints = (
+        cylinder.point + cylinder.direction * cylinder.axial_low,
+        cylinder.point + cylinder.direction * cylinder.axial_high,
+    )
+    projected = [float(np.dot(point, reference_axis)) for point in endpoints]
+    return min(projected), max(projected)
 
 
 def _concentric_axis(parent: _Geometry, child: _Geometry) -> tuple[NDArray[Any], float] | None:
@@ -218,15 +282,22 @@ def _concentric_axis(parent: _Geometry, child: _Geometry) -> tuple[NDArray[Any],
             if radius_error > RADIUS_TOLERANCE_M:
                 continue
             axis_error = float(np.linalg.norm(np.cross(right.point - left.point, left.direction)))
-            if axis_error > LINEAR_TOLERANCE_M or not _bounds_overlap(left.bounds, right.bounds):
+            if axis_error > LINEAR_TOLERANCE_M:
                 continue
-            closeness = (
-                1.0
-                - angular_error / (3.0 * ANGULAR_TOLERANCE_RAD)
-                - radius_error / (3.0 * RADIUS_TOLERANCE_M)
-                - axis_error / (3.0 * LINEAR_TOLERANCE_M)
+            axis = _canonical_direction(left.direction)
+            left_low, left_high = _cylinder_interval(left, axis)
+            right_low, right_high = _cylinder_interval(right, axis)
+            axial_overlap = min(left_high, right_high) - max(left_low, right_low)
+            shorter_span = min(left_high - left_low, right_high - right_low)
+            if axial_overlap <= LINEAR_TOLERANCE_M or shorter_span <= LINEAR_TOLERANCE_M:
+                continue
+            constraint_score = min(
+                max(0.0, 1.0 - angular_error / ANGULAR_TOLERANCE_RAD),
+                max(0.0, 1.0 - radius_error / RADIUS_TOLERANCE_M),
+                max(0.0, 1.0 - axis_error / LINEAR_TOLERANCE_M),
+                min(1.0, axial_overlap / shorter_span),
             )
-            candidates.append((left.point, _canonical_direction(left.direction), closeness))
+            candidates.append((left.point, axis, constraint_score))
     if not candidates:
         return None
 
@@ -239,12 +310,14 @@ def _concentric_axis(parent: _Geometry, child: _Geometry) -> tuple[NDArray[Any],
         )
         if not same_line:
             return None
-    confidence = max(0.6, min(1.0, 0.8 + 0.2 * max(item[2] for item in candidates)))
+    confidence = max(item[2] for item in candidates)
     return axis, confidence
 
 
 def _contact_directions(parent: _Geometry, child: _Geometry) -> list[_ContactDirection]:
-    directions: list[tuple[NDArray[Any], list[tuple[_Bounds, _Bounds]]]] = []
+    directions: list[
+        tuple[NDArray[Any], list[tuple[_Bounds, _Bounds]], list[float]]
+    ] = []
     for left in parent.planes:
         for right in child.planes:
             if not _parallel(left.normal, right.normal):
@@ -252,20 +325,32 @@ def _contact_directions(parent: _Geometry, child: _Geometry) -> list[_ContactDir
             separation = abs(float(np.dot(right.point - left.point, left.normal)))
             if (
                 separation > LINEAR_TOLERANCE_M
-                or not _face_area_overlaps(left.bounds, right.bounds)
+                or not _verified_rectangular_overlap(left, right)
             ):
                 continue
             direction = _canonical_direction(left.normal)
-            for known, face_pairs in directions:
+            offset = float(np.dot(left.point, direction))
+            for known, face_pairs, offsets in directions:
                 if _parallel(direction, known):
                     face_pairs.append((left.bounds, right.bounds))
+                    offsets.append(offset)
                     break
             else:
-                directions.append((direction, [(left.bounds, right.bounds)]))
+                directions.append(
+                    (direction, [(left.bounds, right.bounds)], [offset])
+                )
     return [
-        _ContactDirection(direction=direction, face_pairs=tuple(face_pairs))
-        for direction, face_pairs in directions
+        _ContactDirection(
+            direction=direction,
+            face_pairs=tuple(face_pairs),
+            plane_offsets=tuple(offsets),
+        )
+        for direction, face_pairs, offsets in directions
     ]
+
+
+def _bilaterally_confined(contact: _ContactDirection) -> bool:
+    return max(contact.plane_offsets) - min(contact.plane_offsets) > LINEAR_TOLERANCE_M
 
 
 def _travel_limits(
@@ -323,7 +408,11 @@ def _infer_pair(
         )
 
     contacts = _contact_directions(parent, child)
-    if len(contacts) == 2 and not _parallel(contacts[0].direction, contacts[1].direction):
+    if (
+        len(contacts) == 2
+        and all(_bilaterally_confined(contact) for contact in contacts)
+        and not _parallel(contacts[0].direction, contacts[1].direction)
+    ):
         axis = _canonical_direction(np.cross(contacts[0].direction, contacts[1].direction))
         lower, upper = _travel_limits(contacts, axis)
         return replace(
@@ -393,3 +482,110 @@ def infer_edge_hints(
                 )
             )
     return inferred
+
+
+def _valid_moving_hint(edge: AssemblyEdge, *, min_confidence: float) -> bool:
+    if edge.mate_kind not in {"concentric", "sliding"} or edge.confidence < min_confidence:
+        return False
+    if edge.axis is None:
+        return False
+    axis = np.asarray(edge.axis, dtype=float)
+    return bool(
+        axis.shape == (3,)
+        and np.all(np.isfinite(axis))
+        and float(np.linalg.norm(axis)) > np.finfo(float).eps
+    )
+
+
+def infer_assembly_edge_hints(
+    edges: list[AssemblyEdge],
+    shapes: dict[str, Any],
+    *,
+    unit_scale: float = OCP_UNIT_SCALE_M,
+    min_confidence: float = 0.6,
+) -> list[AssemblyEdge]:
+    """Infer explicit body edges and expand shaped siblings into a rooted body forest.
+
+    Real XCAF topology connects a meshless assembly frame to each shaped child.
+    For siblings under the same frame, this function probes leaf-to-leaf
+    candidates in the first leaf's frame, retains one original frame anchor per
+    accepted moving component, and replaces the redundant frame edges with a
+    deterministic maximum-confidence inferred spanning tree.
+    """
+    inferred_originals = infer_edge_hints(edges, shapes, unit_scale=unit_scale)
+    incoming_count: dict[str, int] = {}
+    siblings_by_parent: dict[str, list[AssemblyEdge]] = {}
+    for edge in edges:
+        incoming_count[edge.child_id] = incoming_count.get(edge.child_id, 0) + 1
+        if edge.child_id in shapes:
+            siblings_by_parent.setdefault(edge.parent_id, []).append(edge)
+
+    removed_anchors: set[tuple[str, str]] = set()
+    selected_body_edges: list[AssemblyEdge] = []
+    for frame_id in sorted(siblings_by_parent):
+        siblings = sorted(siblings_by_parent[frame_id], key=lambda edge: edge.child_id)
+        siblings = [edge for edge in siblings if incoming_count[edge.child_id] == 1]
+        candidates: list[AssemblyEdge] = []
+        for index, first in enumerate(siblings):
+            for second in siblings[index + 1 :]:
+                try:
+                    relative_pose = np.linalg.inv(first.relative_pose) @ second.relative_pose
+                except (TypeError, ValueError, np.linalg.LinAlgError):
+                    continue
+                candidates.append(
+                    AssemblyEdge(
+                        parent_id=first.child_id,
+                        child_id=second.child_id,
+                        relative_pose=relative_pose,
+                    )
+                )
+        accepted = [
+            edge
+            for edge in infer_edge_hints(candidates, shapes, unit_scale=unit_scale)
+            if _valid_moving_hint(edge, min_confidence=min_confidence)
+        ]
+
+        parent_for: dict[str, str] = {}
+
+        def find(node: str) -> str:
+            parent_for.setdefault(node, node)
+            while parent_for[node] != node:
+                parent_for[node] = parent_for[parent_for[node]]
+                node = parent_for[node]
+            return node
+
+        def union(first: str, second: str) -> bool:
+            first_root, second_root = find(first), find(second)
+            if first_root == second_root:
+                return False
+            parent_for[max(first_root, second_root)] = min(first_root, second_root)
+            return True
+
+        selected: list[AssemblyEdge] = []
+        for edge in sorted(
+            accepted,
+            key=lambda item: (-item.confidence, item.parent_id, item.child_id),
+        ):
+            if union(edge.parent_id, edge.child_id):
+                selected.append(edge)
+
+        components: dict[str, set[str]] = {}
+        for edge in selected:
+            root = find(edge.parent_id)
+            components.setdefault(root, set()).update((edge.parent_id, edge.child_id))
+        for members in components.values():
+            anchor = min(members)
+            removed_anchors.update(
+                (frame_id, member) for member in members if member != anchor
+            )
+        selected_body_edges.extend(selected)
+
+    kept = [
+        edge
+        for edge in inferred_originals
+        if (edge.parent_id, edge.child_id) not in removed_anchors
+    ]
+    return kept + sorted(
+        selected_body_edges,
+        key=lambda edge: (edge.parent_id, edge.child_id),
+    )

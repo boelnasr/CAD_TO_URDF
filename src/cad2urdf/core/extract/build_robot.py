@@ -69,13 +69,16 @@ def build_robot_from_tree(
         pname, cname = by_id[e.parent_id].name, by_id[e.child_id].name
         jn = f"{cname}_to_{pname}"
         needs_limits = e.joint_type in _LIMITED_JOINT_TYPES
+        origin = np.asarray(e.relative_pose, dtype=float)
+        axis_parent = np.asarray(e.axis, dtype=float)
+        axis_joint = origin[:3, :3].T @ axis_parent
         joints[jn] = Joint(
             name=jn,
             type=e.joint_type,
             parent=pname,
             child=cname,
-            axis=np.asarray(e.axis, dtype=float),
-            origin=np.asarray(e.relative_pose, dtype=float),
+            axis=axis_joint,
+            origin=origin,
             limit_lower=e.limit_lower,
             limit_upper=e.limit_upper,
             # Static CAD geometry cannot infer actuator capability. Small,

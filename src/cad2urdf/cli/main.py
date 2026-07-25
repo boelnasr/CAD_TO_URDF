@@ -151,7 +151,7 @@ def _build_cad_robot(inp: Path, out_dir: Path, robot_name: str) -> Robot:
     """
     try:
         from cad2urdf.core.extract.build_robot import build_robot_from_tree
-        from cad2urdf.core.extract.joint_infer import infer_edge_hints
+        from cad2urdf.core.extract.joint_infer import infer_assembly_edge_hints
         from cad2urdf.core.extract.mate_classify import (
             classify_default_fixed,
             classify_from_hints,
@@ -187,7 +187,7 @@ def _build_cad_robot(inp: Path, out_dir: Path, robot_name: str) -> Robot:
         ) from e
     try:
         classified = (
-            classify_from_hints(infer_edge_hints(asm.edges, shapes))
+            classify_from_hints(infer_assembly_edge_hints(asm.edges, shapes))
             if shapes
             else classify_default_fixed(asm.edges)
         )

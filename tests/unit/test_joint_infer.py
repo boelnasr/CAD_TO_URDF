@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -53,6 +55,51 @@ def test_real_coaxial_cylindrical_faces_infer_parent_frame_axis() -> None:
     assert classified[0].limit_upper is None
 
 
+def test_diagonal_coaxial_cylinders_with_disjoint_axial_intervals_stay_fixed() -> None:
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
+
+    cylinder = BRepPrimAPI_MakeCylinder(5.0, 20.0).Shape()
+    rotation = gp_Trsf()
+    rotation.SetRotation(
+        gp_Ax1(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(1.0, 1.0, 0.0)),
+        0.4,
+    )
+    parent = BRepBuilderAPI_Transform(cylinder, rotation, True).Shape()
+    child = BRepBuilderAPI_Transform(cylinder, rotation, True).Shape()
+    translated_axis = gp_Vec(0.0, 0.0, 1.0).Transformed(rotation)
+    pose = np.eye(4)
+    pose[:3, 3] = np.array(
+        [translated_axis.X(), translated_axis.Y(), translated_axis.Z()]
+    ) * 0.021
+
+    inferred = infer_edge_hints([_edge(pose)], {"parent": parent, "child": child})
+
+    assert inferred[0].mate_kind in {None, "unknown"}
+    assert inferred[0].confidence < 0.6
+    assert classify_from_hints(inferred)[0].joint_type == "fixed"
+
+
+def test_near_tolerance_cylinder_pair_downgrades_on_worst_constraint() -> None:
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+
+    parent = BRepPrimAPI_MakeCylinder(5.0, 20.0).Shape()
+    angle = math.radians(0.9)
+    child_axis = gp_Ax2(
+        gp_Pnt(0.0, 0.09, 0.0),
+        gp_Dir(math.sin(angle), 0.0, math.cos(angle)),
+    )
+    child = BRepPrimAPI_MakeCylinder(child_axis, 5.09, 20.0).Shape()
+
+    inferred = infer_edge_hints([_edge()], {"parent": parent, "child": child})
+
+    assert inferred[0].mate_kind == "concentric"
+    assert inferred[0].confidence < 0.6
+    assert classify_from_hints(inferred)[0].joint_type == "fixed"
+
+
 def test_real_rectangular_guide_infers_only_free_translation_and_travel() -> None:
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
@@ -102,6 +149,51 @@ def test_two_support_planes_meeting_only_along_an_edge_stay_fixed() -> None:
     pose[0, 3] = 0.01
     pose[1, 3] = 0.01
     pose[2, 3] = 0.002
+
+    inferred = infer_edge_hints([_edge(pose)], {"parent": parent, "child": child})
+
+    assert inferred[0].mate_kind in {None, "unknown"}
+    assert inferred[0].confidence < 0.6
+    assert classify_from_hints(inferred)[0].joint_type == "fixed"
+
+
+def test_two_perpendicular_one_sided_wall_contacts_stay_fixed() -> None:
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    x_wall = BRepPrimAPI_MakeBox(gp_Pnt(-5.0, 0.0, 0.0), 5.0, 8.0, 50.0).Shape()
+    y_wall = BRepPrimAPI_MakeBox(gp_Pnt(0.0, -5.0, 0.0), 10.0, 5.0, 50.0).Shape()
+    parent = BRepAlgoAPI_Fuse(x_wall, y_wall).Shape()
+    child = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), 10.0, 8.0, 20.0).Shape()
+    pose = np.eye(4)
+    pose[2, 3] = 0.015
+
+    inferred = infer_edge_hints([_edge(pose)], {"parent": parent, "child": child})
+
+    assert inferred[0].mate_kind in {None, "unknown"}
+    assert inferred[0].confidence < 0.6
+    assert classify_from_hints(inferred)[0].joint_type == "fixed"
+
+
+def test_disjoint_oblique_coplanar_face_bounds_stay_fixed() -> None:
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
+
+    box = BRepPrimAPI_MakeBox(20.0, 20.0, 20.0).Shape()
+    rotation = gp_Trsf()
+    rotation.SetRotation(
+        gp_Ax1(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(1.0, 1.0, 0.0)),
+        0.4,
+    )
+    parent = BRepBuilderAPI_Transform(box, rotation, True).Shape()
+    child = BRepBuilderAPI_Transform(box, rotation, True).Shape()
+    translated_axis = gp_Vec(0.0, 0.0, 1.0).Transformed(rotation)
+    pose = np.eye(4)
+    pose[:3, 3] = np.array(
+        [translated_axis.X(), translated_axis.Y(), translated_axis.Z()]
+    ) * 0.021
 
     inferred = infer_edge_hints([_edge(pose)], {"parent": parent, "child": child})
 
