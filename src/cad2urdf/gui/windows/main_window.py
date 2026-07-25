@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QCloseEvent, QKeySequence
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -44,6 +44,12 @@ class MainWindow(QMainWindow):
         self.action_save.triggered.connect(self._on_save_clicked)
         self.action_open.triggered.connect(self._on_open_clicked)
         self._validate_worker = None
+
+    def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802 - Qt API
+        """Release generated document assets when the window is accepted closed."""
+        super().closeEvent(event)
+        if event is None or event.isAccepted():
+            self.controller.shutdown()
 
     # ---- construction helpers ----------------------------------------------
     def _build_docks(self) -> None:
@@ -177,8 +183,6 @@ class MainWindow(QMainWindow):
 
     # ---- import CAD action -------------------------------------------------
     def _on_import_cad_clicked(self) -> None:
-        import tempfile
-
         from PyQt6.QtWidgets import QFileDialog, QInputDialog
 
         from cad2urdf.gui.dialogs.import_meshes import run_cad_import_into_controller
@@ -191,12 +195,10 @@ class MainWindow(QMainWindow):
         robot_name, ok = QInputDialog.getText(self, "Robot name", "Robot name:", text="my_robot")
         if not ok or not robot_name.strip():
             return
-        mesh_dir = Path(tempfile.mkdtemp(prefix="cad2urdf_cad_"))
         try:
             run_cad_import_into_controller(
                 controller=self.controller,
                 cad_path=Path(path_str),
-                mesh_dir=mesh_dir,
                 robot_name=robot_name.strip(),
             )
         except RuntimeError as e:

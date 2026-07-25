@@ -210,3 +210,170 @@ Result: `Success: no issues found in 64 source files`
 - GUI/MCP imports keep their generated mesh temp directory for the lifetime of
   the process because live Robot links reference those files. This matches the
   existing STEP GUI behavior.
+
+---
+
+## Fix round 1/5 — background MCP import and generated-asset ownership
+
+### Review findings addressed
+
+1. MCP `import_cad` no longer executes OCP parsing, tessellation, and STL export
+   on the dispatcher/Qt calling thread. `run_worker_job` uses the existing
+   `Worker`/`QThread` mechanism and a local `QEventLoop`: the heavy callable runs
+   in the worker thread while Qt continues processing events, then the
+   dispatcher resumes on the Qt thread, calls `RobotController.replace`, and
+   returns the same synchronous JSON envelope to the socket client.
+2. Added `CadAssetOwner`, an explicit per-controller/session owner for generated
+   CAD mesh trees.
+   - only directories allocated by that owner can be activated or deleted
+   - failed GUI and MCP imports discard their pending partial tree
+   - successful imports replace/emit the new Robot first, then delete the
+     superseded active CAD tree
+   - ordinary fresh-document replacement (mesh import/project open) retires the
+     prior CAD tree after emitting the replacement
+   - controller/window/application shutdown removes active and pending owned
+     trees
+   - source CAD paths and caller-owned output directories are never adopted
+3. README now states that CAD import is a fresh-document exception which clears
+   undo/redo history.
+
+The prior concern above that generated meshes remain for the full process is
+superseded by this fix: only the current CAD document's generated tree remains,
+and it is removed at document replacement or shutdown.
+
+### Saved-project durability assessment
+
+The current project format (`SCHEMA_VERSION = 1`) is JSON-only.
+`core/project/save.py::_link_to_dict` serializes `visual_mesh_path` and
+`collision_mesh_path` as path strings, while `save_project` writes only that
+JSON payload; it does not copy or bundle mesh bytes. Consequently, a project
+saved from a live CAD import points at session-owned absolute mesh paths. The
+required shutdown cleanup makes those paths unavailable in a later process.
+
+Making such a project durable requires a product/schema decision (for example,
+a project bundle/directory format, asset copying rules, relative-path
+resolution, collision policy, and migration from schema v1). That is beyond
+Task 2 and was not silently introduced here. The strongest safe in-scope
+behavior is implemented: deterministic ownership and cleanup during the live
+session, with no risk of deleting user-owned input/output directories.
+
+### Files changed in this fix round
+
+- New: `src/cad2urdf/gui/state/cad_assets.py`
+- Updated:
+  - `src/cad2urdf/gui/state/controller.py`
+  - `src/cad2urdf/gui/workers/base.py`
+  - `src/cad2urdf/gui/control/dispatcher.py`
+  - `src/cad2urdf/gui/dialogs/import_meshes.py`
+  - `src/cad2urdf/gui/windows/main_window.py`
+  - `src/cad2urdf/gui/app.py`
+  - `README.md`
+- Tests:
+  - `tests/gui/test_cad_asset_owner.py`
+  - `tests/gui/control/test_dispatcher_build.py`
+  - `tests/gui/control/test_dispatcher_project.py`
+  - `tests/gui/test_import_dialog.py`
+  - `tests/gui/test_main_window.py`
+
+### Strict TDD evidence
+
+Primary fix-round RED:
+
+```bash
+env -u PYTHONPATH -u AMENT_PREFIX_PATH \
+  QT_QPA_PLATFORM=offscreen PYVISTA_OFF_SCREEN=true \
+  VTK_DEFAULT_OPENGL_WINDOW=vtkOSOpenGLRenderWindow \
+  .venv/bin/pytest \
+  tests/gui/control/test_dispatcher_build.py::test_import_cad_runs_heavy_job_off_dispatch_thread \
+  tests/gui/test_cad_asset_owner.py \
+  tests/gui/test_import_dialog.py::test_failed_cad_import_removes_generated_assets_but_not_source \
+  tests/gui/control/test_dispatcher_project.py::test_failed_mcp_cad_import_removes_generated_assets_but_not_source \
+  -q -ra
+```
+
+Result before production changes: **7 failed**.
+
+- the heavy job thread ID equalled the dispatcher/main thread ID
+- all four ownership lifecycle tests failed because no explicit owner existed
+- GUI and MCP failed-import cleanup tests failed because no owner existed
+
+Primary fix-round GREEN: the same command completed with **7 passed**.
+
+Shutdown RED:
+
+```bash
+env -u PYTHONPATH -u AMENT_PREFIX_PATH \
+  QT_QPA_PLATFORM=offscreen PYVISTA_OFF_SCREEN=true \
+  VTK_DEFAULT_OPENGL_WINDOW=vtkOSOpenGLRenderWindow \
+  .venv/bin/pytest \
+  tests/gui/test_main_window.py::test_closing_window_removes_current_generated_cad_assets \
+  -q -ra
+```
+
+Result before `MainWindow.closeEvent` ownership cleanup: **1 failed**, because
+the active generated directory still existed after close.
+
+Shutdown GREEN: the same command completed with **1 passed**.
+
+### Focused and full verification
+
+Focused amended/relevant gate:
+
+```bash
+env -u PYTHONPATH -u AMENT_PREFIX_PATH \
+  QT_QPA_PLATFORM=offscreen PYVISTA_OFF_SCREEN=true \
+  VTK_DEFAULT_OPENGL_WINDOW=vtkOSOpenGLRenderWindow \
+  .venv/bin/pytest \
+  tests/unit/test_iges_parser.py tests/integration/test_iges_pipeline.py \
+  tests/unit/test_import_cad_wiring.py tests/unit/control/test_protocol.py \
+  tests/gui/test_cad_asset_owner.py tests/gui/test_import_dialog.py \
+  tests/gui/test_step_import_worker.py tests/gui/test_main_window.py \
+  tests/gui/test_worker_base.py tests/gui/control/test_dispatcher_build.py \
+  tests/gui/control/test_dispatcher_project.py tests/gui/control/test_server.py \
+  tests/gui/test_controller.py tests/gui/test_project_io_menu.py -q -ra
+```
+
+Result: **54 passed**.
+
+Full suite:
+
+```bash
+env -u PYTHONPATH -u AMENT_PREFIX_PATH \
+  QT_QPA_PLATFORM=offscreen PYVISTA_OFF_SCREEN=true \
+  VTK_DEFAULT_OPENGL_WINDOW=vtkOSOpenGLRenderWindow \
+  .venv/bin/pytest -q -ra
+```
+
+Result: **336 passed, 1 skipped**. The one skip remains the optional
+ManipulaPy dependency.
+
+```bash
+env -u PYTHONPATH -u AMENT_PREFIX_PATH .venv/bin/ruff check .
+```
+
+Result: `All checks passed!`
+
+```bash
+env -u PYTHONPATH -u AMENT_PREFIX_PATH \
+  .venv/bin/mypy src/cad2urdf/core src/cad2urdf/gui src/cad2urdf/mcp
+```
+
+Result: `Success: no issues found in 65 source files`
+
+### Fix-round self-review
+
+- Thread boundary: the test records Python thread IDs from the heavy job and
+  controller signal, proving the job is off the dispatch thread and replacement
+  is on it.
+- Wire compatibility: `dispatch` remains synchronous and returns the existing
+  `{ok,result}` / `{ok,error,detail}` envelope. `Worker` retains its public
+  string-valued `failed` signal while the blocking adapter rethrows the original
+  exception type for dispatcher error classification.
+- Cleanup ordering: tests assert the old tree exists inside `robotChanged` and
+  is absent after replacement returns.
+- Ownership safety: activation rejects a user-created directory before Robot
+  mutation, and failure tests prove source files remain unchanged.
+- State boundary: ownership lives beside the controller, not inside `Robot`,
+  project JSON, or MCP/socket payloads; the transient CAF shape map remains
+  unrelated and discarded.
+- Scope: no joint inference, release metadata, project schema, or plan changes.

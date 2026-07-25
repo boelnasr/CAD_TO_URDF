@@ -1,3 +1,4 @@
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -102,3 +103,37 @@ def test_import_cad_replaces_document_and_clears_history(
     assert controller.current().name == "fresh"
     assert not controller.can_undo()
     assert not controller.can_redo()
+
+
+def test_import_cad_runs_heavy_job_off_dispatch_thread(
+    monkeypatch: pytest.MonkeyPatch, qapp, tmp_path: Path
+) -> None:
+    """Calling the CAD job directly in the dispatcher would freeze Qt and fail this."""
+    controller = RobotController()
+    dispatch_thread = threading.get_ident()
+    heavy_threads: list[int] = []
+    replace_threads: list[int] = []
+    controller.robotChanged.connect(lambda _robot: replace_threads.append(threading.get_ident()))
+
+    def fake_builder(*, path: Path, mesh_dir: Path, robot_name: str):
+        def job(_report):
+            heavy_threads.append(threading.get_ident())
+            return replace(controller.current(), name=robot_name)
+
+        return job
+
+    monkeypatch.setattr(
+        "cad2urdf.gui.control.dispatcher.build_cad_import_job", fake_builder
+    )
+
+    response = CommandDispatcher(controller).dispatch(
+        {
+            "command": "import_cad",
+            "args": {"path": str(tmp_path / "robot.iges"), "robot_name": "fresh"},
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["result"]["name"] == "fresh"
+    assert heavy_threads and heavy_threads[0] != dispatch_thread
+    assert replace_threads == [dispatch_thread]

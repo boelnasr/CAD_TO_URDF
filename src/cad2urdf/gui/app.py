@@ -59,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if server is not None:
             server.stop()
+        win.controller.shutdown()
 
 
 if __name__ == "__main__":

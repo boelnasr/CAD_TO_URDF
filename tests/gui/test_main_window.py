@@ -76,6 +76,21 @@ def test_cad_import_action_and_dialog_cover_step_and_iges(
     ]
 
 
+def test_closing_window_removes_current_generated_cad_assets(qtbot) -> None:
+    """Closing the GUI without another import must still release session assets."""
+    from cad2urdf.gui.windows.main_window import MainWindow
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assets = win.controller.create_cad_import_dir()
+    (assets / "body.stl").write_text("mesh")
+    win.controller.replace_with_cad_assets(win.controller.current(), asset_dir=assets)
+
+    win.close()
+
+    assert not assets.exists()
+
+
 def test_controller_replace_enables_undo(qtbot) -> None:
     from pathlib import Path
 

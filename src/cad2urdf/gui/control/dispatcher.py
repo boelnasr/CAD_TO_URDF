@@ -24,6 +24,7 @@ from cad2urdf.core.project.save import load_project, robot_to_payload, save_proj
 from cad2urdf.gui.control import protocol
 from cad2urdf.gui.state.controller import RobotController
 from cad2urdf.gui.workers.export_package import build_export_job
+from cad2urdf.gui.workers.base import run_worker_job
 from cad2urdf.gui.workers.import_meshes import build_import_job
 from cad2urdf.gui.workers.step_import import build_cad_import_job
 from cad2urdf.gui.workers.validate import build_validate_job
@@ -96,14 +97,20 @@ class CommandDispatcher:
         return robot_to_payload(self._controller.current())
 
     def _cmd_import_cad(self, args: dict[str, Any]) -> dict[str, Any]:
-        import tempfile
-
         path = Path(args["path"])
         robot_name = args.get("robot_name", path.stem)
-        mesh_dir = Path(tempfile.mkdtemp(prefix="cad2urdf_cad_"))
-        job = build_cad_import_job(path=path, mesh_dir=mesh_dir, robot_name=robot_name)
-        robot = job(lambda _c, _t, _m: None)
-        self._controller.replace(robot)
+        mesh_dir = self._controller.create_cad_import_dir()
+        try:
+            job = build_cad_import_job(path=path, mesh_dir=mesh_dir, robot_name=robot_name)
+            robot = run_worker_job(job)
+            if not isinstance(robot, Robot):
+                raise TypeError(
+                    f"CAD import worker must return Robot, got {type(robot).__name__}"
+                )
+            self._controller.replace_with_cad_assets(robot, asset_dir=mesh_dir)
+        except BaseException:
+            self._controller.discard_cad_import_dir(mesh_dir)
+            raise
         return robot_to_payload(self._controller.current())
 
     def _cmd_rename_link(self, args: dict[str, Any]) -> dict[str, Any]:

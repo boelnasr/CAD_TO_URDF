@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 import trimesh
 
@@ -66,3 +68,38 @@ def test_export_package_writes_files(dispatcher, tmp_path):
     assert resp["ok"] is True
     assert (out / "package.xml").is_file()
     assert (out / "urdf" / "rig.urdf").is_file()
+
+
+def test_failed_mcp_cad_import_removes_generated_assets_but_not_source(
+    monkeypatch: pytest.MonkeyPatch, qapp, tmp_path: Path
+) -> None:
+    """The command error envelope must not leave partial generated assets behind."""
+    try:
+        from cad2urdf.gui.state.cad_assets import CadAssetOwner
+    except ModuleNotFoundError:
+        pytest.fail("generated CAD assets do not have an explicit owner")
+
+    source = tmp_path / "source.iges"
+    source.write_text("user input")
+    owned_root = tmp_path / "owned"
+    controller = RobotController(cad_assets=CadAssetOwner(root=owned_root))
+
+    def failing_builder(*, path: Path, mesh_dir: Path, robot_name: str):
+        def job(_report):
+            (mesh_dir / "partial.stl").write_text("partial")
+            raise ValueError("broken CAD")
+
+        return job
+
+    monkeypatch.setattr(
+        "cad2urdf.gui.control.dispatcher.build_cad_import_job", failing_builder
+    )
+
+    response = CommandDispatcher(controller).dispatch(
+        {"command": "import_cad", "args": {"path": str(source)}}
+    )
+
+    assert response["ok"] is False
+    assert "broken CAD" in response["detail"]
+    assert source.read_text() == "user input"
+    assert list(owned_root.iterdir()) == []

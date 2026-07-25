@@ -268,7 +268,8 @@ flowchart LR
 ```
 
 Every edit runs through the same `RobotController` a human uses, so changes render
-live and land on the undo/redo stack. Available tools:
+live and land on the undo/redo stack. CAD import is the fresh-document exception:
+it replaces the current robot and clears undo/redo history. Available tools:
 
 | Group | Tools |
 |---|---|

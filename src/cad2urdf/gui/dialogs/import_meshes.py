@@ -11,7 +11,7 @@ from PyQt6.QtCore import QEventLoop
 
 from cad2urdf.core.kinematic.model import Robot
 from cad2urdf.gui.state.controller import RobotController
-from cad2urdf.gui.workers.base import Worker
+from cad2urdf.gui.workers.base import Worker, run_worker_job
 from cad2urdf.gui.workers.import_meshes import build_import_job
 from cad2urdf.gui.workers.step_import import build_cad_import_job
 
@@ -49,12 +49,35 @@ def run_cad_import_into_controller(
     *,
     controller: RobotController,
     cad_path: Path,
-    mesh_dir: Path,
     robot_name: str,
 ) -> None:
     """Spin up the CAD import worker and block on a local QEventLoop until done."""
+    mesh_dir = controller.create_cad_import_dir()
+    try:
+        job = build_cad_import_job(
+            path=cad_path, mesh_dir=mesh_dir, robot_name=robot_name
+        )
+        result = run_worker_job(job)
+        if not isinstance(result, Robot):
+            raise TypeError(
+                f"CAD import worker must return Robot, got {type(result).__name__}"
+            )
+        controller.replace_with_cad_assets(result, asset_dir=mesh_dir)
+    except BaseException as error:
+        controller.discard_cad_import_dir(mesh_dir)
+        raise RuntimeError(str(error)) from error
+
+
+def run_step_import_into_controller(
+    *,
+    controller: RobotController,
+    step_path: Path,
+    mesh_dir: Path,
+    robot_name: str,
+) -> None:
+    """Compatibility wrapper for the former STEP-specific dialog helper."""
     worker = Worker(
-        build_cad_import_job(path=cad_path, mesh_dir=mesh_dir, robot_name=robot_name)
+        build_cad_import_job(path=step_path, mesh_dir=mesh_dir, robot_name=robot_name)
     )
     loop = QEventLoop()
     error_holder: dict[str, str] = {}
@@ -75,19 +98,3 @@ def run_cad_import_into_controller(
 
     if "err" in error_holder:
         raise RuntimeError(error_holder["err"])
-
-
-def run_step_import_into_controller(
-    *,
-    controller: RobotController,
-    step_path: Path,
-    mesh_dir: Path,
-    robot_name: str,
-) -> None:
-    """Compatibility wrapper for the former STEP-specific dialog helper."""
-    run_cad_import_into_controller(
-        controller=controller,
-        cad_path=step_path,
-        mesh_dir=mesh_dir,
-        robot_name=robot_name,
-    )
