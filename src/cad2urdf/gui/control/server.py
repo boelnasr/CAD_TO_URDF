@@ -35,10 +35,12 @@ class ControlServer(QObject):
         self._buffers: dict[QLocalSocket, bytes] = {}
         self._pending: deque[tuple[QLocalSocket, bytes]] = deque()
         self._dispatching = False
+        self._stopping = False
         self._server.newConnection.connect(self._on_new_connection)
 
     def start(self) -> None:
         """Begin listening. Removes any stale socket file first."""
+        self._stopping = False
         QLocalServer.removeServer(self._socket_name)
         if not self._server.listen(self._socket_name):
             raise RuntimeError(
@@ -48,17 +50,57 @@ class ControlServer(QObject):
         _log.info("ControlServer listening on %s", self._socket_name)
 
     def stop(self) -> None:
-        for conn in list(self._buffers):
-            conn.disconnectFromServer()
-        self._buffers.clear()
-        self._pending.clear()
+        """Stop accepting work and reject anything queued behind a handler.
+
+        A CAD handler runs a nested Qt event loop while its worker is active.
+        Close can therefore arrive while :meth:`_drain_pending` is on the
+        stack. In that case connections stay alive until the active request and
+        all already-framed queued requests receive FIFO shutdown errors.
+        """
+        if self._stopping:
+            return
+        self._stopping = True
+        self._dispatcher.begin_shutdown()
         self._server.close()
         QLocalServer.removeServer(self._socket_name)
+        for conn in list(self._buffers):
+            if conn.bytesAvailable():
+                self._collect_available(conn)
+        if not self._dispatching:
+            self._reject_pending()
+            self._finish_stop()
+
+    def _reject_pending(self) -> None:
+        while self._pending:
+            conn, _raw = self._pending.popleft()
+            if conn in self._buffers:
+                self._write_response(
+                    conn,
+                    protocol.err(
+                        "shutting_down",
+                        "GUI is shutting down; command was not executed",
+                    ),
+                )
+
+    def _finish_stop(self) -> None:
+        for conn in list(self._buffers):
+            conn.flush()
+            conn.disconnectFromServer()
+        self._buffers.clear()
+
+    @staticmethod
+    def _write_response(conn: QLocalSocket, response: dict[str, object]) -> None:
+        conn.write(protocol.encode(response).encode("utf-8"))
+        conn.flush()
 
     # ---- connection handling ------------------------------------------------
     def _on_new_connection(self) -> None:
         conn = self._server.nextPendingConnection()
         if conn is None:
+            return
+        if self._stopping:
+            conn.disconnectFromServer()
+            conn.deleteLater()
             return
         self._buffers[conn] = b""
         conn.readyRead.connect(lambda c=conn: self._on_ready_read(c))
@@ -72,6 +114,11 @@ class ControlServer(QObject):
         if conn not in self._buffers:
             return
         self._collect_available(conn)
+        if self._stopping:
+            if not self._dispatching:
+                self._reject_pending()
+                self._finish_stop()
+            return
         self._drain_pending()
 
     def _collect_available(self, conn: QLocalSocket) -> None:
@@ -86,6 +133,10 @@ class ControlServer(QObject):
         """Dispatch complete requests FIFO, without nested-loop reentrancy."""
         if self._dispatching:
             return
+        if self._stopping:
+            self._reject_pending()
+            self._finish_stop()
+            return
         self._dispatching = True
         try:
             while self._pending:
@@ -93,8 +144,15 @@ class ControlServer(QObject):
                 if conn not in self._buffers:
                     continue
                 response = self._response_for(raw)
-                conn.write(protocol.encode(response).encode("utf-8"))
-                conn.flush()
+                if self._stopping:
+                    response = protocol.err(
+                        "shutting_down",
+                        "GUI is shutting down; command was not completed",
+                    )
+                self._write_response(conn, response)
+                if self._stopping:
+                    self._reject_pending()
+                    break
                 # A nested event loop may coalesce readyRead while this slot is
                 # active. Poll after the response so those bytes cannot strand.
                 for open_conn in list(self._buffers):
@@ -102,6 +160,8 @@ class ControlServer(QObject):
                         self._collect_available(open_conn)
         finally:
             self._dispatching = False
+            if self._stopping:
+                self._finish_stop()
 
     def _response_for(self, raw: bytes) -> dict[str, object]:
         try:

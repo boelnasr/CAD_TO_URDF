@@ -49,9 +49,19 @@ class CommandDispatcher:
         # Injected so the dispatcher stays headlessly testable; the real server
         # supplies a window-grab callback.
         self._grab_png = grab_png
+        self._shutting_down = False
+
+    def begin_shutdown(self) -> None:
+        """Reject new commands once GUI teardown starts."""
+        self._shutting_down = True
 
     def dispatch(self, message: dict[str, Any]) -> dict[str, Any]:
         """Execute one command message, returning an ok/err envelope."""
+        if self._shutting_down:
+            return protocol.err(
+                "shutting_down",
+                "GUI is shutting down; command was not executed",
+            )
         command = message.get("command")
         if command not in protocol.COMMANDS:
             return protocol.err("unknown_command", f"no such command: {command!r}")

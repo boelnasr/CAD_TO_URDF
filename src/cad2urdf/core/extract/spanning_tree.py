@@ -56,15 +56,11 @@ def build_spanning_tree(
                 # flip parent/child to make BFS root the parent. The relative_pose
                 # describes child-relative-to-parent, so inverting it gives the new
                 # (flipped) child-relative-to-parent. Express the axis in the
-                # new parent frame, then negate its direction and bounds because
-                # the joint's positive coordinate reverses.
+                # new parent frame, then negate its direction. Retaining the
+                # original bounds preserves the same joint-coordinate
+                # parameterization: each reversed endpoint is the inverse of
+                # the corresponding original endpoint.
                 inverse_pose = np.linalg.inv(original.relative_pose)
-                reversed_lower = (
-                    -original.limit_upper if original.limit_upper is not None else None
-                )
-                reversed_upper = (
-                    -original.limit_lower if original.limit_lower is not None else None
-                )
                 out.append(
                     ClassifiedJoint(
                         parent_id=cur,
@@ -72,8 +68,8 @@ def build_spanning_tree(
                         joint_type=original.joint_type,
                         axis=-(inverse_pose[:3, :3] @ original.axis),
                         relative_pose=inverse_pose,
-                        limit_lower=reversed_lower,
-                        limit_upper=reversed_upper,
+                        limit_lower=original.limit_lower,
+                        limit_upper=original.limit_upper,
                     )
                 )
             else:

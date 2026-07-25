@@ -91,6 +91,30 @@ def test_closing_window_removes_current_generated_cad_assets(qtbot) -> None:
     assert not assets.exists()
 
 
+def test_closing_window_stops_control_queue_before_controller(qtbot, monkeypatch) -> None:
+    """No queued command may outlive the controller's mutation boundary."""
+    from cad2urdf.gui.windows.main_window import MainWindow
+
+    calls: list[str] = []
+
+    class FakeServer:
+        def stop(self) -> None:
+            calls.append("server")
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.set_control_server(FakeServer())  # type: ignore[arg-type]
+    monkeypatch.setattr(
+        win.controller,
+        "shutdown",
+        lambda: calls.append("controller"),
+    )
+
+    win.close()
+
+    assert calls == ["server", "controller"]
+
+
 def test_controller_replace_enables_undo(qtbot) -> None:
     from pathlib import Path
 

@@ -12,8 +12,9 @@ follows [Semantic Versioning](https://semver.org/).
 - Advisory B-rep joint inference for clear concentric and rectangular sliding
   relationships. Current geometry probes emit continuous and prismatic joints;
   uncertain or unsupported relationships remain fixed.
-- Deterministic maximum-confidence tree construction across shaped sibling
-  bodies, with conservative handling of ambiguous axes and contacts.
+- Maximum-confidence forest selection across shaped sibling-body hypotheses,
+  followed by deterministic BFS rooting and conservative handling of ambiguous
+  axes and contacts.
 - A unified MCP `import_cad` tool for `.step`, `.stp`, `.iges`, and `.igs`
   assemblies.
 - Generated OCP fixtures and end-to-end coverage for STEP, IGES, GUI, MCP, joint

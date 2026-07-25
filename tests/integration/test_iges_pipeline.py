@@ -9,7 +9,7 @@ import pytest
 pytest.importorskip("OCP")
 
 from cad2urdf.cli.main import main
-from tests.unit.test_iges_parser import _write_flat_iges
+from tests.unit.test_iges_parser import _write_flat_iges, _write_two_free_iges
 
 
 @pytest.mark.parametrize("suffix", [".iges", ".igs"])
@@ -70,3 +70,32 @@ def test_cli_rejects_mixing_iges_with_other_inputs(
 
     assert rc == 2
     assert "single input" in capsys.readouterr().err
+
+
+def test_iges_cli_keeps_every_top_level_body_and_mesh(tmp_path: Path) -> None:
+    """The shared CAF walk must not silently discard free labels after index one."""
+    iges = tmp_path / "two_bodies.iges"
+    out_pkg = tmp_path / "two_bodies_description"
+    _write_two_free_iges(iges)
+
+    rc = main(
+        [
+            str(iges),
+            "-o",
+            str(out_pkg),
+            "--robot-name",
+            "two_bodies",
+            "--package-name",
+            "two_bodies_description",
+            "--no-validate",
+        ]
+    )
+
+    assert rc == 0
+    text = (out_pkg / "urdf" / "two_bodies.urdf").read_text()
+    assert '<link name="assembly_root"' in text
+    assert '<link name="body"' in text
+    assert '<link name="body_2"' in text
+    assert text.count('type="fixed"') == 2
+    assert (out_pkg / "meshes" / "visual" / "body.stl").is_file()
+    assert (out_pkg / "meshes" / "visual" / "body_2.stl").is_file()

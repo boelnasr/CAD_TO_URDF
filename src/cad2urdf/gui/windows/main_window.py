@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QCloseEvent, QKeySequence
@@ -12,6 +13,9 @@ from PyQt6.QtWidgets import (
 )
 
 from cad2urdf.gui.state.controller import RobotController
+
+if TYPE_CHECKING:
+    from cad2urdf.gui.control.server import ControlServer
 
 
 class MainWindow(QMainWindow):
@@ -23,6 +27,7 @@ class MainWindow(QMainWindow):
         self.resize(1280, 800)
 
         self.controller = RobotController()
+        self._control_server: ControlServer | None = None
 
         from cad2urdf.gui.viewport.widget import ViewportWidget
 
@@ -49,7 +54,13 @@ class MainWindow(QMainWindow):
         """Release generated document assets when the window is accepted closed."""
         super().closeEvent(event)
         if event is None or event.isAccepted():
+            if self._control_server is not None:
+                self._control_server.stop()
             self.controller.shutdown()
+
+    def set_control_server(self, server: ControlServer) -> None:
+        """Bind the local control queue to this window's shutdown lifecycle."""
+        self._control_server = server
 
     # ---- construction helpers ----------------------------------------------
     def _build_docks(self) -> None:

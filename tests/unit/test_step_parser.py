@@ -74,3 +74,61 @@ def test_load_step_assembly_extracts_names_hierarchy_poses(tmp_path: Path) -> No
 
 def asm_id_to_name(asm: StepAssembly, node_id: str) -> str:
     return next(p.name for p in asm.parts if p.id == node_id)
+
+
+def test_shared_caf_walk_applies_free_label_placement_once(tmp_path: Path) -> None:
+    """Synthetic-root edges own free-label placement; leaf meshes stay local."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Trsf, gp_Vec
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TDF import TDF_Label
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    from cad2urdf.core.parsers.caf import load_caf_assembly
+
+    class GeneratedReader:
+        def ReadFile(self, _path: str):  # noqa: N802 - OCP reader protocol
+            return IFSelect_RetDone
+
+        def Transfer(self, doc):  # noqa: N802 - OCP reader protocol
+            tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+            first = tool.AddShape(
+                BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape(), False
+            )
+            second = tool.AddShape(
+                BRepPrimAPI_MakeBox(20.0, 10.0, 10.0).Shape(), False
+            )
+            TDataStd_Name.Set_s(first, TCollection_ExtendedString("first"))
+            placement = gp_Trsf()
+            placement.SetTranslation(gp_Vec(50.0, 0.0, 0.0))
+            located_second = TDF_Label()
+            assert tool.SetLocation(
+                second, TopLoc_Location(placement), located_second
+            )
+            TDataStd_Name.Set_s(
+                located_second, TCollection_ExtendedString("second")
+            )
+
+    source = tmp_path / "generated.step"
+    source.touch()
+    assembly, _shapes = load_caf_assembly(
+        reader_factory=GeneratedReader,
+        path=source,
+    )
+
+    edge_for = {edge.child_id: edge for edge in assembly.edges}
+    part_for = {part.id: part for part in assembly.parts}
+    second_mesh = part_for["second"].mesh
+    assert second_mesh is not None
+    assert edge_for["second"].relative_pose[:3, 3] == pytest.approx(
+        [0.05, 0.0, 0.0]
+    )
+    assert second_mesh.centroid == pytest.approx([0.01, 0.005, 0.005])
+    second_world_centroid = edge_for["second"].relative_pose @ [
+        *second_mesh.centroid,
+        1.0,
+    ]
+    assert second_world_centroid[:3] == pytest.approx([0.06, 0.005, 0.005])

@@ -339,10 +339,11 @@ For example, import an assembly without a joints YAML:
 cad2urdf robot.iges -o robot_description --no-validate
 ```
 
-The CAD path infers candidate joints from geometry, builds a deterministic
-maximum-confidence tree, and emits the package. The emitted ROS package is not
-a GUI project. If you need to review or edit the inferred tree, import the
-original CAD assembly through the GUI first, then export from that session.
+The CAD path infers candidate joints from geometry, selects a
+maximum-confidence forest among sibling-body hypotheses, roots it with a
+deterministic BFS, and emits the package. The emitted ROS package is not a GUI
+project. If you need to review or edit the inferred tree, import the original
+CAD assembly through the GUI first, then export from that session.
 
 ---
 

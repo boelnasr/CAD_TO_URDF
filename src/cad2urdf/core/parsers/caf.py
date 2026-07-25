@@ -157,7 +157,7 @@ def load_caf_assembly(
         TDF_Tool.Entry_s(label, value)
         return str(value.ToCString())
 
-    def visit(label: Any) -> str:
+    def visit(label: Any, *, localize_shape: bool = False) -> str:
         key = entry(label)
         if key in id_for:
             return id_for[key]
@@ -168,6 +168,14 @@ def load_caf_assembly(
         mesh = None
         if not is_assembly:
             shape = tool.GetShape_s(label)
+            if localize_shape:
+                # A top-level free shape may carry a placement directly on its
+                # label. The synthetic root edge owns that placement, so
+                # tessellate and infer from the unlocated body to avoid applying
+                # it once in the mesh and again in the kinematic tree.
+                from OCP.TopLoc import TopLoc_Location
+
+                shape = shape.Located(TopLoc_Location())
             shapes[node_id] = shape
             mesh = tessellate(shape, unit_scale=unit_scale)
         parts.append(StepPart(id=node_id, name=node_id, mesh=mesh, is_leaf=not is_assembly))
@@ -192,7 +200,26 @@ def load_caf_assembly(
     tool.GetFreeShapes(free)
     if free.Length() == 0:
         raise ValueError(f"CAD file has no shapes: {path}")
-    root_id = visit(free.Value(1))
+    if free.Length() == 1:
+        # Preserve the long-standing flat/single-root behavior: the free shape
+        # itself is the root, including any placement embedded in its mesh.
+        root_id = visit(free.Value(1))
+    else:
+        # Multiple independent free shapes have no common XCAF parent. Create
+        # one explicit frame so every body survives as a reachable Robot link.
+        # Reserving its ID first also makes collisions with source names stable.
+        root_id = _sanitize("assembly_root", used)
+        parts.append(StepPart(id=root_id, name=root_id, mesh=None, is_leaf=False))
+        for i in range(1, free.Length() + 1):
+            label = free.Value(i)
+            child_id = visit(label, localize_shape=True)
+            edges.append(
+                AssemblyEdge(
+                    parent_id=root_id,
+                    child_id=child_id,
+                    relative_pose=_pose_of(label, tool, unit_scale),
+                )
+            )
     assembly = StepAssembly(parts=parts, edges=edges, root_id=root_id)
     del doc
     return assembly, shapes

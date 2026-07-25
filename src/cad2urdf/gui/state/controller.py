@@ -108,6 +108,7 @@ class RobotController(QObject):
 
         Re-raises any exception from `transform` without mutating state.
         """
+        self._ensure_running()
         before = self._robot
         after = transform(before)  # may raise — propagated to caller
         if not isinstance(after, Robot):
@@ -119,6 +120,7 @@ class RobotController(QObject):
         self.historyChanged.emit(label)
 
     def undo(self) -> None:
+        self._ensure_running()
         if not self._undo:
             return
         entry = self._undo.pop()
@@ -128,6 +130,7 @@ class RobotController(QObject):
         self.historyChanged.emit(f"undo {entry.label}")
 
     def redo(self) -> None:
+        self._ensure_running()
         if not self._redo:
             return
         entry = self._redo.pop()
