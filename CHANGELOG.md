@@ -10,8 +10,8 @@ follows [Semantic Versioning](https://semver.org/).
 - STEP and IGES assembly import through one CAD pipeline in the CLI, desktop
   GUI, and MCP server.
 - Advisory B-rep joint inference for clear concentric and rectangular sliding
-  relationships. Inferred outputs include continuous, revolute, and prismatic
-  joints; uncertain or unsupported relationships remain fixed.
+  relationships. Current geometry probes emit continuous and prismatic joints;
+  uncertain or unsupported relationships remain fixed.
 - Deterministic maximum-confidence tree construction across shaped sibling
   bodies, with conservative handling of ambiguous axes and contacts.
 - A unified MCP `import_cad` tool for `.step`, `.stp`, `.iges`, and `.igs`
@@ -37,4 +37,7 @@ follows [Semantic Versioning](https://semver.org/).
   simulation or hardware use.
 - Oblique/nonrectangular guides, conflicting cylinder axes, and multi-parent
   XCAF instances remain fixed.
-- Schema-v1 project files store mesh paths and do not bundle durable CAD assets.
+- CAD-import tessellations live in a session temporary directory that expires
+  when the document is replaced or the GUI exits. Schema-v1 project files only
+  store paths to those meshes, so CAD-import projects are not durably reopenable
+  after exit; review and export within the current session.

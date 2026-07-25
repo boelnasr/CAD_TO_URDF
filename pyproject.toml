@@ -48,7 +48,8 @@ dev = [
     "types-PyYAML",
     "tomli>=2; python_version < '3.11'",
 ]
-# Install as: pip install -e ".[dev,mcp]" to expose the GUI to MCP clients.
+# Install as: pip install -e ".[gui,mcp]" for MCP-controlled GUI workflows, or
+# ".[gui,mcp,step]" when STEP/IGES import_cad support is also needed.
 mcp = [
     "mcp>=1.2.0,<2",
 ]

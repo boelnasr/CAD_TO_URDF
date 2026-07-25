@@ -19,7 +19,7 @@ from each mesh using a user-supplied material density, validated by the user's
 
 | Version | Status | Scope |
 |---|---|---|
-| **v1.0.0** (current) | shipped | STEP + IGES assembly import across CLI, GUI, and MCP, with conservative geometry-based inference of continuous/revolute/prismatic joints and a safe fixed fallback |
+| **v1.0.0** (current) | shipped | STEP + IGES assembly import across CLI, GUI, and MCP, with conservative geometry-based inference of continuous/prismatic joints and a safe fixed fallback |
 | v0.2.0a0 | shipped | PyQt6/VTK GUI, end-to-end MCP control, and STEP assembly import |
 | v0.1.0a0 | shipped | CLI core: STL/OBJ in, full ROS package out, ManipulaPy validation gate |
 | v2.x | planned | Planar-joint inference and optional natural-language priors |
@@ -231,7 +231,14 @@ flowchart LR
   RViz), with PBR metallic shading, soft lighting + ground shadow, and a
   contrasting highlight on the selected link. Click a link to select it.
 - **Export** a full ROS 2 ament package (`Export → Export ROS Package`) or save a
-  `.cad2urdf` project to reopen later.
+  `.cad2urdf` project.
+
+> **CAD project warning.** Tessellated meshes from a CAD import live in a
+> session temporary directory that is removed when the document is replaced or
+> the app exits. Schema-v1 project files only save paths to those meshes, so a
+> project saved from a CAD import is not durably reopenable after exit. Review
+> and export the ROS package in the same session. A future schema is needed for
+> self-contained CAD asset bundles.
 
 > **Inputs.** The GUI imports `.stl` / `.obj` meshes (one file per link) and, with
 > the `[step]` extra installed, full STEP (`.step` / `.stp`) and IGES (`.iges` /
@@ -250,7 +257,8 @@ Running headless (no display)? See the offscreen env vars under
 validate, export a ROS package, and screenshot the live window.
 
 ```bash
-pip install -e ".[mcp]"      # adds the MCP SDK
+pip install -e ".[gui,mcp]"       # MCP-controlled GUI for STL/OBJ workflows
+pip install -e ".[gui,mcp,step]"  # also enables STEP/IGES import_cad
 ```
 
 Register it with your MCP client (Claude Code example):
@@ -332,8 +340,9 @@ cad2urdf robot.iges -o robot_description --no-validate
 ```
 
 The CAD path infers candidate joints from geometry, builds a deterministic
-maximum-confidence tree, and emits the package. Treat the result as advisory
-and review it in the GUI before deploying it to hardware.
+maximum-confidence tree, and emits the package. The emitted ROS package is not
+a GUI project. If you need to review or edit the inferred tree, import the
+original CAD assembly through the GUI first, then export from that session.
 
 ---
 
@@ -448,13 +457,10 @@ can produce a moving joint:
 flowchart TD
     A["STEP/IGES parts + poses<br/>transient B-rep side map"] --> B["compare shaped sibling bodies<br/>in common assembly frame"]
     B --> C{"unambiguous geometry?"}
-    C -->|"coaxial cylinders"| D{"rotation bounded?"}
-    D -->|no| E["continuous"]
-    D -->|yes| F["revolute<br/>measured limits or ±π fallback"]
+    C -->|"coaxial cylinders"| E["continuous"]
     C -->|"bilaterally enclosed<br/>rectangular planar guide"| G["prismatic<br/>measured travel or ±0.1 m fallback"]
     C -->|"ambiguous / unsupported"| H["fixed"]
     E --> I{"confidence ≥ 0.6?"}
-    F --> I
     G --> I
     I -->|no| H
     I -->|yes| J["maximum-confidence forest<br/>fixed frame anchors added as needed"]
@@ -593,10 +599,12 @@ The CLI is stateless, but `core/project/save.py` exposes `save_project(robot, pa
 
 Schema migrations live in a `_MIGRATIONS: dict[(int,int), Callable]` registry — empty in v1, populated when `SCHEMA_VERSION` bumps. Loading an unsupported version raises with a pointer to the registry file.
 
-> **Schema-v1 asset limitation.** A project file stores mesh paths; it does not
-> embed or bundle the referenced mesh/CAD assets. Keep those files in stable
-> locations when moving or reopening a project. Durable, self-contained CAD
-> asset bundles require a future schema.
+> **Schema-v1 CAD asset limitation.** A project file stores mesh paths; it does
+> not embed or bundle the referenced assets. CAD-import tessellations live in a
+> session temporary directory and are removed when the document is replaced or
+> the GUI exits. Consequently, a project saved from a CAD import is not durably
+> reopenable after exit. Review and export within the current session. Durable,
+> self-contained CAD asset bundles require a future schema.
 
 ---
 

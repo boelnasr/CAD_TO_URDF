@@ -4,7 +4,9 @@
 
 **Goal:** Ship cad2urdf v1.0, defined by the two README roadmap pillars:
 1. **IGES support** (`.iges`/`.igs`) alongside the shipped STEP path.
-2. **Richer assembly mate extraction** — auto-classify `concentric → revolute`, `sliding → prismatic`, with a safe `unknown → fixed` fallback, replacing the v0.2 every-edge-fixed stub.
+2. **Richer assembly mate extraction** — auto-classify
+   `concentric → continuous`, `sliding → prismatic`, with a safe
+   `unknown → fixed` fallback, replacing the v0.2 every-edge-fixed stub.
 
 **Architecture (Approach A, decided 2026-06-14):** Extract the XCAF document walk shared by STEP and IGES into a new `core/parsers/caf.py`; STEP and IGES become thin wrappers differing only in the CAF reader class (`STEPCAFControl_Reader` vs `IGESCAFControl_Reader`). The B-rep `TopoDS_Shape` handle per part is carried in a **side-map keyed by `part_id`** that lives OUTSIDE the frozen, serializable `Robot`/`StepPart` AST (OCP handles are not JSON/pickle-serializable). A new `core/extract/joint_infer.py` consumes that side-map to populate `AssemblyEdge` hint fields (`mate_kind`, `axis`, `confidence`); `mate_classify.py` gains a hint-aware classifier that reads those hints. The pure non-OCP pipeline (`spanning_tree`, `build_robot`) is unchanged.
 
@@ -35,16 +37,20 @@ status summary.
   transient-shape variant is a separate API.
 - CLI, GUI, and MCP use one `import_cad` path for STEP and IGES. A CAD import
   replaces the active document and clears undo/redo.
-- Moving hints require confidence `>= 0.6`. Limitless concentric geometry maps
-  to `continuous`; bounded concentric geometry maps to `revolute` (with `±π`
-  fallback); sliding geometry maps to `prismatic` (with `±0.1 m` fallback).
+- Moving hints require confidence `>= 0.6`. Current CAD geometry probes map
+  concentric geometry to `continuous` and sliding geometry to `prismatic` (with
+  `±0.1 m` fallback); everything else remains fixed. The pure hint classifier
+  can represent an externally supplied bounded concentric hint as `revolute`,
+  but the v1 CAD geometry probes do not produce rotation bounds.
 - Inference was expanded beyond direct CAF edges to compare shaped siblings in
   a common assembly frame, then select a deterministic maximum-confidence
   forest. Oblique/nonrectangular guides, incompatible axes, and multi-parent
   XCAF instances conservatively remain fixed.
 - OCP B-rep handles stay outside the serializable AST and are released before
-  `Robot` construction. Schema-v1 project saves retain mesh paths only; they do
-  not bundle durable CAD assets.
+  `Robot` construction. CAD-import tessellations live in a session temporary
+  directory that expires on document replacement or GUI exit; schema-v1 project
+  saves retain only those mesh paths and are not durably reopenable after exit.
+  Review and export within the same session.
 - CI already installs `[dev,gui,step,mcp]`; generated STEP/IGES fixtures cover
   both readers and the geometry-inference path.
 
@@ -176,16 +182,23 @@ infer_edge_hints(
 ```
 
 - [ ] **Step 1 — Geometry probes (lazy OCP).** For a parent/child shape pair, extract candidate cylindrical/planar faces (`BRepAdaptor_Surface` → `GeomAbs_Cylinder` / `GeomAbs_Plane`). All OCP imports inside function bodies.
-- [ ] **Step 2 — Concentric → revolute.** If parent and child share a coaxial cylindrical-face pair (axes collinear within tolerance), set `mate_kind="concentric"`, `axis = cylinder axis` (in the edge's parent frame), `confidence` from axis-alignment + radius match.
+- [ ] **Step 2 — Concentric → continuous.** If parent and child share a coaxial cylindrical-face pair (axes collinear within tolerance), set `mate_kind="concentric"`, `axis = cylinder axis` (in the edge's parent frame), `confidence` from axis-alignment + radius match. Current geometry probes do not derive bounded rotation.
 - [ ] **Step 3 — Sliding → prismatic.** If they share parallel planar faces / a prismatic contact with a free translational direction and NO shared rotation axis, set `mate_kind="sliding"`, `axis = slide direction`, `confidence` accordingly.
 - [ ] **Step 4 — Fallback.** Anything ambiguous/unknown → leave `mate_kind=None` (or `"unknown"`), `confidence` low. Never raise — inference is advisory.
 - [ ] **Step 5 — Tolerances as named constants.** Angular/linear/radius tolerances are module-level named constants with docstrings, tunable without touching logic.
-- [ ] **Step 6 — `classify_from_hints`.** In `mate_classify.py`: `concentric → revolute` (default symmetric limits, e.g. `±π`, configurable), `sliding → prismatic` (translation limits from face extents or a sane default), else `fixed`. Carry `axis` and `relative_pose` into `ClassifiedJoint`. Below a `min_confidence` threshold, downgrade to `fixed` (conservative). Keep `classify_default_fixed` for the no-hint / no-OCP path.
+- [ ] **Step 6 — `classify_from_hints`.** In `mate_classify.py`: limitless
+  `concentric → continuous`, `sliding → prismatic` (translation limits from
+  face extents or a sane default), else `fixed`. The pure classifier also
+  supports externally supplied bounded concentric hints as `revolute`, but the
+  v1 geometry probes do not emit rotation bounds. Carry `axis` and
+  `relative_pose` into `ClassifiedJoint`. Below a `min_confidence` threshold,
+  downgrade to `fixed` (conservative). Keep `classify_default_fixed` for the
+  no-hint / no-OCP path.
 - [ ] **Step 7 — Wire into the pipeline.** CLI `_build_cad_robot` and the GUI CAF job call `infer_edge_hints(asm.edges, shapes)` then `classify_from_hints(...)` (falling back to `classify_default_fixed` if `shapes` is empty). `build_spanning_tree` consumes the classified edges unchanged.
-- [ ] **Step 8 — Tests.** Unit-test `joint_infer` with synthetic OCP shapes (or fixtures) for the three cases + fallback (`importorskip("OCP")`). Unit-test `classify_from_hints` purely (synthetic `AssemblyEdge`s with hints — NO OCP needed). Integration-test a known assembly fixture asserting at least one `revolute`/`prismatic` is inferred and the URDF emits.
+- [ ] **Step 8 — Tests.** Unit-test `joint_infer` with synthetic OCP shapes (or fixtures) for the three cases + fallback (`importorskip("OCP")`). Unit-test `classify_from_hints` purely (synthetic `AssemblyEdge`s with hints — NO OCP needed). Integration-test a known assembly fixture asserting at least one `continuous`/`prismatic` is inferred and the URDF emits.
 
 **Acceptance:**
-- Synthetic concentric pair → `revolute` with correct axis; sliding pair → `prismatic`; ambiguous → `fixed` with low confidence.
+- Synthetic concentric pair → `continuous` with correct axis; sliding pair → `prismatic`; ambiguous → `fixed` with low confidence.
 - `classify_from_hints` is testable with zero OCP (pure dataclass in/out).
 - Low-confidence edges downgrade to `fixed` (no silently-wrong moving joints).
 - Existing STEP fixtures that previously emitted all-fixed still emit valid URDF (no crash if inference finds nothing).
@@ -196,11 +209,11 @@ infer_edge_hints(
 
 **Files:** `pyproject.toml`, `.github/workflows/ci.yml`, `README.md`, fixtures under `tests/`.
 
-- [x] **Step 1 — Fixtures.** Add/generate small IGES + STEP fixtures with a known revolute (concentric) and prismatic (sliding) mate. Prefer generating them in a fixture helper (OCP/cadquery) over committing large binaries; gate with `importorskip("OCP")` and a `needs_step_fixture`-style marker.
+- [x] **Step 1 — Fixtures.** Add/generate small IGES + STEP fixtures with a known continuous (concentric) and prismatic (sliding) mate. Prefer generating them in a fixture helper (OCP/cadquery) over committing large binaries; gate with `importorskip("OCP")` and a `needs_step_fixture`-style marker.
 - [x] **Step 2 — OCP-not-on-PyPI / CI.** CI already installs `[dev,gui,step,mcp]` (pulls `cadquery-ocp`) and runs under `xvfb`. Confirm the IGES path is exercised. If a future pure-pip-without-OCP matrix leg is wanted, ensure all OCP-dependent tests `importorskip("OCP")` so the no-OCP leg stays green. **The pure non-OCP `mate_classify` hint path must have coverage that runs without OCP.**
 - [x] **Step 3 — mypy strict.** New modules (`caf.py`, `iges.py`, `joint_infer.py`) clean under strict; reuse the OCP `import-untyped` override.
 - [x] **Step 4 — Full gate.** `unset PYTHONPATH AMENT_PREFIX_PATH && pytest && mypy && ruff check` all green (GUI tests with offscreen env).
-- [x] **Step 5 — README.** Roadmap: move IGES + auto-classification to "shipped v1.0". Install: note IGES uses the same `[step]`/OCP path (no new extra). GUI/CLI: document IGES inputs and that joints are now auto-typed (review/confirm in editor). MCP: add the `import_cad` tool row. Add a joint-inference algorithm subsection with a **Mermaid** flowchart (concentric→revolute / sliding→prismatic / else→fixed). Bump status badge to v1.0.
+- [x] **Step 5 — README.** Roadmap: move IGES + auto-classification to "shipped v1.0". Install: note IGES uses the same `[step]`/OCP path (no new extra). GUI/CLI: document IGES inputs and that joints are now auto-typed (review/confirm in editor). MCP: add the `import_cad` tool row. Add a joint-inference algorithm subsection with a **Mermaid** flowchart (concentric→continuous / sliding→prismatic / else→fixed). Bump status badge to v1.0.
 
 **Acceptance:** CI green on a matrix that exercises STEP + IGES + GUI + MCP; README accurately reflects v1.0 capabilities and the new tool; mypy/ruff clean.
 
@@ -242,8 +255,9 @@ flowchart LR
 2. **B-rep lifetime / memory.** `TopoDS_Shape` handles and the XCAF `doc` retain the full loaded model; leaking them into the `Robot`, the GUI controller, or the MCP boundary would balloon memory and break serialization. *Mitigation:* Task 3's explicit scope boundary + the `.cad2urdf` round-trip guard test + the "no OCP type on any dataclass" assertion.
 3. **OCP in CI / not on PyPI as a pure wheel.** IGES + inference depend on `cadquery-ocp`; CI already pulls it, but any reviewer on a pure-pip-no-OCP setup, or a future no-OCP CI leg, must not break. *Mitigation:* `importorskip("OCP")` on every OCP-touching test; keep `classify_from_hints` pure (OCP-free, fully testable) so the classification logic has coverage independent of the geometry probes; keep all OCP imports lazy/in-function so `core` import stays clean.
 
-**Open decisions to resolve before execution:**
-- One unified MCP `import_cad` tool vs separate `import_step`/`import_iges` (plan recommends unified).
-- Default joint limits for inferred revolute/prismatic (symmetric `±π` / face-extent vs a fixed default) — needs a product call.
-- `min_confidence` threshold value for the fixed-downgrade — start conservative (e.g. 0.6) and tune against fixtures.
-- Whether to emit `continuous` for limitless concentric mates (plan recommends yes, gated on confidence).
+**Decisions resolved before execution:**
+- One unified MCP `import_cad` tool handles STEP and IGES.
+- Current geometry probes emit `continuous` for concentric geometry. They do
+  not emit bounded rotation; prismatic limits use measured travel when
+  trustworthy and otherwise `±0.1 m`.
+- `min_confidence` is `0.6`; lower-confidence hints downgrade to fixed.
