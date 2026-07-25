@@ -63,6 +63,19 @@ class _ContactDirection:
 
 
 @dataclass(frozen=True)
+class _AxisLine:
+    point: NDArray[Any]
+    direction: NDArray[Any]
+
+
+@dataclass(frozen=True)
+class _ConcentricCandidate:
+    parent_axis: _AxisLine
+    child_axis: _AxisLine
+    confidence: float
+
+
+@dataclass(frozen=True)
 class _Geometry:
     cylinders: tuple[_Cylinder, ...]
     planes: tuple[_Plane, ...]
@@ -269,8 +282,21 @@ def _cylinder_interval(
     return min(projected), max(projected)
 
 
+def _axis_lines_compatible(first: _AxisLine, second: _AxisLine) -> bool:
+    if not _parallel(first.direction, second.direction):
+        return False
+    cross_directions = np.cross(first.direction, second.direction)
+    cross_norm = float(np.linalg.norm(cross_directions))
+    delta = second.point - first.point
+    if cross_norm > np.finfo(float).eps:
+        line_distance = abs(float(np.dot(delta, cross_directions))) / cross_norm
+    else:
+        line_distance = float(np.linalg.norm(np.cross(delta, first.direction)))
+    return line_distance <= LINEAR_TOLERANCE_M
+
+
 def _concentric_axis(parent: _Geometry, child: _Geometry) -> tuple[NDArray[Any], float] | None:
-    candidates: list[tuple[NDArray[Any], NDArray[Any], float]] = []
+    candidates: list[_ConcentricCandidate] = []
     for left in parent.cylinders:
         for right in child.cylinders:
             if not _parallel(left.direction, right.direction):
@@ -297,21 +323,33 @@ def _concentric_axis(parent: _Geometry, child: _Geometry) -> tuple[NDArray[Any],
                 max(0.0, 1.0 - axis_error / LINEAR_TOLERANCE_M),
                 min(1.0, axial_overlap / shorter_span),
             )
-            candidates.append((left.point, axis, constraint_score))
+            candidates.append(
+                _ConcentricCandidate(
+                    parent_axis=_AxisLine(point=left.point, direction=axis),
+                    child_axis=_AxisLine(
+                        point=right.point,
+                        direction=_canonical_direction(right.direction),
+                    ),
+                    confidence=constraint_score,
+                )
+            )
     if not candidates:
         return None
 
-    point, axis, _ = candidates[0]
-    for other_point, other_axis, _ in candidates[1:]:
-        same_line = (
-            _parallel(axis, other_axis)
-            and float(np.linalg.norm(np.cross(other_point - point, axis)))
-            <= LINEAR_TOLERANCE_M
-        )
-        if not same_line:
+    axis_lines = [
+        axis_line
+        for candidate in candidates
+        for axis_line in (candidate.parent_axis, candidate.child_axis)
+    ]
+    for index, axis_line in enumerate(axis_lines):
+        if not all(
+            _axis_lines_compatible(axis_line, other)
+            for other in axis_lines[index + 1 :]
+        ):
             return None
-    confidence = max(item[2] for item in candidates)
-    return axis, confidence
+
+    best = max(candidates, key=lambda candidate: candidate.confidence)
+    return best.parent_axis.direction, best.confidence
 
 
 def _contact_directions(parent: _Geometry, child: _Geometry) -> list[_ContactDirection]:

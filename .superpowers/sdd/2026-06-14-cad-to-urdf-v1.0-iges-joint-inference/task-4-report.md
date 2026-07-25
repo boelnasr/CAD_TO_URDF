@@ -548,3 +548,129 @@ git diff --check
 - Candidate generation is pairwise within each direct sibling group. This is
   deterministic and appropriate for v1 assemblies, but large flat assemblies
   have quadratic probe cost.
+
+## Fix round 2: mutually incompatible cylinder axes
+
+### Finding and correction
+
+Concentric candidates were checked against one selected parent cylinder line,
+then the maximum candidate confidence was retained. That could overstate
+confidence when separate child cylinders were each within the 100 µm
+parent/child tolerance but were more than 100 µm apart from one another.
+
+The real-OCP regression builds one parent cylinder and a child compound with
+parallel cylinder axes offset by +11 µm and -90 µm. Each child is individually
+eligible against the parent, but the child axes are mutually separated by
+101 µm, so they cannot support one physical joint axis.
+
+Each concentric candidate now retains both its parent and child axis lines.
+Before selecting any confidence, inference requires every retained line to be
+parallel and within the linear tolerance of every other retained line. An
+incompatible cluster produces no concentric hint, preserving the conservative
+fixed fallback. The existing pair acceptance checks, axial-overlap requirement,
+and worst-constraint confidence calculation are unchanged.
+
+### RED
+
+```text
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest \
+  -o addopts='-ra --strict-markers' -q \
+  tests/unit/test_joint_infer.py -k 'mutually_incompatible' -vv
+
+assert 0.89 < 0.6
+1 failed
+```
+
+### GREEN
+
+The focused boundary set retained the exact positive and near-tolerance
+downgrade while rejecting the incompatible cluster:
+
+```text
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest \
+  -o addopts='-ra --strict-markers' -q \
+  tests/unit/test_joint_infer.py \
+  -k 'mutually_incompatible or real_coaxial or near_tolerance' -vv
+
+3 passed, 8 deselected in 0.57s
+```
+
+Geometry unit suite:
+
+```text
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/pytest \
+  -o addopts='-ra --strict-markers' -q \
+  tests/unit/test_joint_infer.py
+
+11 passed in 0.61s
+```
+
+Focused Task 4:
+
+```text
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+QT_QPA_PLATFORM=offscreen PYVISTA_OFF_SCREEN=true \
+VTK_DEFAULT_OPENGL_WINDOW=vtkOSOpenGLRenderWindow \
+.venv/bin/pytest -o addopts='-ra --strict-markers' -q \
+  tests/unit/test_mate_classify_hints.py \
+  tests/unit/test_joint_infer.py \
+  tests/unit/test_extract_mate_classify.py \
+  tests/unit/test_extract_spanning_tree.py \
+  tests/unit/test_build_robot.py \
+  tests/integration/test_joint_inference_pipeline.py \
+  tests/gui/test_step_import_worker.py
+
+44 passed in 0.73s
+```
+
+STEP + IGES regression:
+
+```text
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+QT_QPA_PLATFORM=offscreen PYVISTA_OFF_SCREEN=true \
+VTK_DEFAULT_OPENGL_WINDOW=vtkOSOpenGLRenderWindow \
+.venv/bin/pytest -o addopts='-ra --strict-markers' -q \
+  tests/unit/test_step_parser.py tests/unit/test_iges_parser.py \
+  tests/unit/test_caf_parser.py tests/integration/test_step_pipeline.py \
+  tests/integration/test_iges_pipeline.py tests/gui/test_step_import_worker.py
+
+16 passed in 0.69s
+```
+
+Full software-VTK suite:
+
+```text
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+QT_QPA_PLATFORM=offscreen PYVISTA_OFF_SCREEN=true \
+VTK_DEFAULT_OPENGL_WINDOW=vtkOSOpenGLRenderWindow \
+.venv/bin/pytest -o addopts='-ra --strict-markers' -q -p pytestqt.plugin
+
+371 passed, 1 skipped in 6.00s
+```
+
+The single skip remains the optional ManipulaPy gate.
+
+Static gates:
+
+```text
+.venv/bin/ruff check src tests
+All checks passed!
+
+.venv/bin/mypy src/cad2urdf/core src/cad2urdf/gui src/cad2urdf/mcp
+Success: no issues found in 66 source files
+
+git diff --check
+# exit 0, no output
+```
+
+### Self-review
+
+- Confidence selection occurs only after all parent and child axis lines form
+  one mutually compatible cluster; a high-confidence candidate cannot mask an
+  incompatible candidate.
+- The new fixture uses real OCP B-rep cylinders and exercises transformed
+  cylinder surface geometry rather than mocked internals.
+- Exact coaxial inference and near-tolerance confidence downgrade remain
+  covered and passing.
+- No assembly-graph, Robot-frame, lifecycle, parser, or public API behavior was
+  broadened in this fix.

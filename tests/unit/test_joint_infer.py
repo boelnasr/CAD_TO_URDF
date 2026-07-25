@@ -100,6 +100,31 @@ def test_near_tolerance_cylinder_pair_downgrades_on_worst_constraint() -> None:
     assert classify_from_hints(inferred)[0].joint_type == "fixed"
 
 
+def test_mutually_incompatible_child_cylinder_axes_stay_fixed() -> None:
+    from OCP.BRep import BRep_Builder
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+    from OCP.TopoDS import TopoDS_Compound
+
+    parent = BRepPrimAPI_MakeCylinder(5.0, 20.0).Shape()
+    child = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(child)
+    for y_offset_mm in (0.0, -0.101):
+        axis = gp_Ax2(
+            gp_Pnt(0.0, y_offset_mm, 0.0),
+            gp_Dir(0.0, 0.0, 1.0),
+        )
+        builder.Add(child, BRepPrimAPI_MakeCylinder(axis, 5.0, 20.0).Shape())
+    pose = np.eye(4)
+    pose[1, 3] = 11.0e-6
+
+    inferred = infer_edge_hints([_edge(pose)], {"parent": parent, "child": child})
+
+    assert inferred[0].confidence < 0.6
+    assert classify_from_hints(inferred)[0].joint_type == "fixed"
+
+
 def test_real_rectangular_guide_infers_only_free_translation_and_travel() -> None:
     from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
