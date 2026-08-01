@@ -29,7 +29,7 @@ follows [Semantic Versioning](https://semver.org/).
   preserve FIFO ordering.
 - The existing `[step]` optional dependency now enables both STEP and IGES
   support.
-- CI now exposes unit tests as a dedicated required job while retaining the
+- CI now exposes unit tests as a dedicated job while retaining the
   complete headless integration and GUI suite.
 
 ### Safety and limitations
