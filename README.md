@@ -2,7 +2,7 @@
 
 Convert CAD assemblies into ROS 2-ready URDF packages.
 
-[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-371%20passed-brightgreen)](#development) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v1.0.0-brightgreen)](#status--roadmap)
+[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-384%20passed-brightgreen)](#development) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v1.0.0-brightgreen)](#status--roadmap)
 
 `cad2urdf` takes mesh files (STL or OBJ) plus a YAML joint description, or a
 STEP/IGES assembly (`.stp`/`.step`/`.igs`/`.iges`, via the `[step]` extra) whose
@@ -613,7 +613,7 @@ Schema migrations live in a `_MIGRATIONS: dict[(int,int), Callable]` registry â€
 
 ```bash
 unset PYTHONPATH AMENT_PREFIX_PATH    # strip ROS leakage
-pytest                                # 371 passing unit + integration + GUI tests
+pytest                                # 384 passing unit + integration + GUI tests
 pytest -m slow                        # ManipulaPy validation tests (need [urdf-io])
 ```
 
@@ -628,10 +628,12 @@ The type checker is clean on every committed revision; CI enforces this gate.
 ### Continuous integration
 
 [GitHub Actions](.github/workflows/ci.yml) runs on every push to `main` and every
-pull request: **ruff** (lint), **mypy** (strict), and the **full pytest suite**
-(unit + integration + GUI). The job installs the `[dev,gui,step,mcp]` extras so
-the STEP/IGES (OCP) and Qt/VTK paths are exercised, and runs the GUI/CAD tests
-headless under `xvfb` with `QT_QPA_PLATFORM=offscreen` + `PYVISTA_OFF_SCREEN=true`.
+pull request. A dedicated **unit tests** job runs `pytest tests/unit`, providing
+an explicit unit-test status check. The full CI job separately enforces **ruff**
+(lint), **mypy** (strict), and the complete unit + integration + GUI suite. It
+installs the `[dev,gui,step,mcp]` extras so the STEP/IGES (OCP) and Qt/VTK paths
+are exercised, and runs the GUI/CAD tests headless under `xvfb` with
+`QT_QPA_PLATFORM=offscreen` + `PYVISTA_OFF_SCREEN=true`.
 Generated STEP and IGES fixtures exercise both CAD readers and the inference
 path without committing large binary fixtures.
 
