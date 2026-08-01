@@ -144,8 +144,15 @@ def save_project(robot: Robot, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     asset_dir = path.parent / f"{path.stem}_assets"
     staging = Path(tempfile.mkdtemp(prefix=f".{asset_dir.name}_", dir=path.parent))
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{path.name}_", suffix=".tmp", dir=path.parent, delete=False
+    ) as json_file:
+        json_staging = Path(json_file.name)
     copied: dict[Path, Path] = {}
     copied_any = False
+    backup_parent: Path | None = None
+    backup_assets: Path | None = None
+    assets_installed = False
     try:
         for link in payload["links"]:
             for field in ("visual_mesh_path", "collision_mesh_path"):
@@ -165,16 +172,35 @@ def save_project(robot: Robot, path: Path) -> None:
                 link[field] = str(Path(asset_dir.name) / relative)
                 copied_any = True
 
+        # Fully materialize the new JSON before changing the live asset tree.
+        # The final Path.replace calls are same-filesystem atomic renames.
+        json_staging.write_text(json.dumps(payload, indent=2, sort_keys=True))
         if copied_any:
             if asset_dir.exists():
-                shutil.rmtree(asset_dir)
+                backup_parent = Path(
+                    tempfile.mkdtemp(prefix=f".{asset_dir.name}_backup_", dir=path.parent)
+                )
+                backup_assets = backup_parent / asset_dir.name
+                asset_dir.replace(backup_assets)
             staging.replace(asset_dir)
+            assets_installed = True
         else:
             shutil.rmtree(staging)
-    except BaseException:
+        json_staging.replace(path)
+    except Exception:
+        # If either the asset install or JSON commit fails, restore the prior
+        # asset tree so the previously saved project remains internally valid.
+        if assets_installed and asset_dir.exists():
+            shutil.rmtree(asset_dir, ignore_errors=True)
+        if backup_assets is not None and backup_assets.exists():
+            backup_assets.replace(asset_dir)
+        if backup_parent is not None:
+            shutil.rmtree(backup_parent, ignore_errors=True)
         shutil.rmtree(staging, ignore_errors=True)
+        json_staging.unlink(missing_ok=True)
         raise
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    if backup_parent is not None:
+        shutil.rmtree(backup_parent, ignore_errors=True)
 
 
 def load_project(path: Path) -> Robot:
