@@ -4,9 +4,16 @@ from cad2urdf.gui.control import protocol
 
 
 def test_known_command_names_include_core_groups():
-    for name in ("get_robot", "import_meshes", "update_joint", "export_package", "screenshot"):
+    for name in (
+        "get_robot",
+        "import_meshes",
+        "import_cad",
+        "update_joint",
+        "export_package",
+        "screenshot",
+    ):
         assert name in protocol.COMMANDS
-    assert len(protocol.COMMANDS) == 17
+    assert len(protocol.COMMANDS) == 18
 
 
 def test_encode_decode_roundtrip():

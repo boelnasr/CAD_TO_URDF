@@ -13,7 +13,7 @@ import traceback
 from collections.abc import Callable
 from typing import Any
 
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from PyQt6.QtCore import QEventLoop, QObject, QThread, pyqtSignal
 
 _log = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ JobFunc = Callable[[ProgressReporter], Any]
 
 class _JobRunner(QObject):
     finished = pyqtSignal(object)
-    failed = pyqtSignal(str, str)
+    failed = pyqtSignal(object, str)
     progress = pyqtSignal(int, int, str)
 
     def __init__(self, job: JobFunc) -> None:
@@ -34,7 +34,7 @@ class _JobRunner(QObject):
         try:
             result = self._job(lambda c, t, m: self.progress.emit(c, t, m))
         except BaseException as e:
-            self.failed.emit(str(e), traceback.format_exc())
+            self.failed.emit(e, traceback.format_exc())
             return
         self.finished.emit(result)
 
@@ -44,6 +44,7 @@ class Worker(QObject):
 
     finished = pyqtSignal(object)
     failed = pyqtSignal(str, str)
+    failed_exception = pyqtSignal(object, str)
     progress = pyqtSignal(int, int, str)
 
     def __init__(self, job: JobFunc, parent: QObject | None = None) -> None:
@@ -69,6 +70,34 @@ class Worker(QObject):
         self.finished.emit(result)
         self._shutdown_thread()
 
-    def _on_failed(self, err: str, trace: str) -> None:
-        self.failed.emit(err, trace)
+    def _on_failed(self, error: BaseException, trace: str) -> None:
+        self.failed_exception.emit(error, trace)
+        self.failed.emit(str(error), trace)
         self._shutdown_thread()
+
+
+def run_worker_job(job: JobFunc) -> Any:
+    """Run ``job`` on a Worker thread while a local Qt loop awaits its result."""
+    worker = Worker(job)
+    loop = QEventLoop()
+    result_holder: list[Any] = []
+    error_holder: list[BaseException] = []
+
+    def _on_finished(result: Any) -> None:
+        result_holder.append(result)
+        loop.quit()
+
+    def _on_failed(error: BaseException, _trace: str) -> None:
+        error_holder.append(error)
+        loop.quit()
+
+    worker.finished.connect(_on_finished)
+    worker.failed_exception.connect(_on_failed)
+    worker.start()
+    loop.exec()
+
+    if error_holder:
+        raise error_holder[0]
+    if not result_holder:
+        raise RuntimeError("worker exited without a result")
+    return result_holder[0]

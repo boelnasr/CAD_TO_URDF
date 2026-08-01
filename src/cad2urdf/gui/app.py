@@ -52,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
 
         dispatcher = CommandDispatcher(win.controller, grab_png=lambda: _grab_png(win))
         server = ControlServer(dispatcher, ns.control_socket)
+        win.set_control_server(server)
         server.start()
 
     try:
@@ -59,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if server is not None:
             server.stop()
+        win.controller.shutdown()
 
 
 if __name__ == "__main__":

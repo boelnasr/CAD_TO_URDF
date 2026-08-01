@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QCloseEvent, QKeySequence
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
 )
 
 from cad2urdf.gui.state.controller import RobotController
+
+if TYPE_CHECKING:
+    from cad2urdf.gui.control.server import ControlServer
 
 
 class MainWindow(QMainWindow):
@@ -23,6 +27,7 @@ class MainWindow(QMainWindow):
         self.resize(1280, 800)
 
         self.controller = RobotController()
+        self._control_server: ControlServer | None = None
 
         from cad2urdf.gui.viewport.widget import ViewportWidget
 
@@ -39,11 +44,23 @@ class MainWindow(QMainWindow):
         self.controller.historyChanged.connect(self._on_history_changed)
         self.action_validate.triggered.connect(self._on_validate_clicked)
         self.action_import.triggered.connect(self._on_import_clicked)
-        self.action_import_step.triggered.connect(self._on_import_step_clicked)
+        self.action_import_cad.triggered.connect(self._on_import_cad_clicked)
         self.action_export.triggered.connect(self._on_export_clicked)
         self.action_save.triggered.connect(self._on_save_clicked)
         self.action_open.triggered.connect(self._on_open_clicked)
         self._validate_worker = None
+
+    def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802 - Qt API
+        """Release generated document assets when the window is accepted closed."""
+        super().closeEvent(event)
+        if event is None or event.isAccepted():
+            if self._control_server is not None:
+                self._control_server.stop()
+            self.controller.shutdown()
+
+    def set_control_server(self, server: ControlServer) -> None:
+        """Bind the local control queue to this window's shutdown lifecycle."""
+        self._control_server = server
 
     # ---- construction helpers ----------------------------------------------
     def _build_docks(self) -> None:
@@ -87,7 +104,8 @@ class MainWindow(QMainWindow):
         self.action_redo.triggered.connect(self.controller.redo)
 
         self.action_validate = QAction("&Validate (dry run)", self)
-        self.action_import_step = QAction("Import &STEP…", self)
+        self.action_import_cad = QAction("Import &CAD assembly…", self)
+        self.action_import_step = self.action_import_cad
 
     def _build_menus(self) -> None:
         mb = self.menuBar()
@@ -96,7 +114,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.action_save)
         file_menu.addSeparator()
         file_menu.addAction(self.action_import)
-        file_menu.addAction(self.action_import_step)
+        file_menu.addAction(self.action_import_cad)
         file_menu.addSeparator()
         file_menu.addAction(self.action_quit)
 
@@ -174,32 +192,32 @@ class MainWindow(QMainWindow):
         except RuntimeError as e:
             self.statusBar().showMessage(f"import failed: {e}", 8000)
 
-    # ---- import STEP action ------------------------------------------------
-    def _on_import_step_clicked(self) -> None:
-        import tempfile
-
+    # ---- import CAD action -------------------------------------------------
+    def _on_import_cad_clicked(self) -> None:
         from PyQt6.QtWidgets import QFileDialog, QInputDialog
 
-        from cad2urdf.gui.dialogs.import_meshes import run_step_import_into_controller
+        from cad2urdf.gui.dialogs.import_meshes import run_cad_import_into_controller
 
         path_str, _filter = QFileDialog.getOpenFileName(
-            self, "Import STEP assembly", "", "STEP (*.step *.stp)"
+            self, "Import CAD assembly", "", "STEP/IGES (*.step *.stp *.iges *.igs)"
         )
         if not path_str:
             return
         robot_name, ok = QInputDialog.getText(self, "Robot name", "Robot name:", text="my_robot")
         if not ok or not robot_name.strip():
             return
-        mesh_dir = Path(tempfile.mkdtemp(prefix="cad2urdf_step_"))
         try:
-            run_step_import_into_controller(
+            run_cad_import_into_controller(
                 controller=self.controller,
-                step_path=Path(path_str),
-                mesh_dir=mesh_dir,
+                cad_path=Path(path_str),
                 robot_name=robot_name.strip(),
             )
         except RuntimeError as e:
             self.statusBar().showMessage(f"import failed: {e}", 8000)
+
+    def _on_import_step_clicked(self) -> None:
+        """Compatibility alias for callers of the former STEP-only slot."""
+        self._on_import_cad_clicked()
 
     # ---- validate action ---------------------------------------------------
     def _on_validate_clicked(self) -> None:

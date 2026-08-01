@@ -114,3 +114,19 @@ def test_apply_rejects_invalid_transform_without_corrupting_state(qtbot) -> None
     # The bad transform must not have mutated state nor pushed an undo entry.
     assert c.current() is before
     assert not c.can_undo()
+
+
+def test_controller_rejects_mutation_after_shutdown(qtbot) -> None:
+    """A direct caller cannot bypass control-server shutdown ordering."""
+    _ = qtbot
+    from cad2urdf.gui.state.controller import RobotController
+
+    controller = RobotController()
+    controller.shutdown()
+
+    with pytest.raises(RuntimeError, match="shutting down"):
+        controller.apply(lambda robot: robot, label="late mutation")
+    with pytest.raises(RuntimeError, match="shutting down"):
+        controller.undo()
+    with pytest.raises(RuntimeError, match="shutting down"):
+        controller.redo()

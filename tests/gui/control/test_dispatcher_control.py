@@ -43,3 +43,18 @@ def test_screenshot_without_grabber_errors(qapp):
     resp = d.dispatch({"command": "screenshot", "args": {}})
     assert resp["ok"] is False
     assert resp["error"] == "no_window"
+
+
+def test_dispatcher_rejects_commands_after_shutdown_begins(qapp):
+    """A late direct dispatch must not reach its registered handler."""
+    _ = qapp
+    dispatcher = CommandDispatcher(RobotController())
+    called: list[bool] = []
+    dispatcher._cmd_get_robot = lambda _args: called.append(True) or {}  # type: ignore[method-assign]
+    dispatcher.begin_shutdown()
+
+    response = dispatcher.dispatch({"command": "get_robot", "args": {}})
+
+    assert response["ok"] is False
+    assert response["error"] == "shutting_down"
+    assert called == []

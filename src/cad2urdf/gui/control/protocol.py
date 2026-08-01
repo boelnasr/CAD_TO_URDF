@@ -20,6 +20,7 @@ COMMANDS: frozenset[str] = frozenset(
         "gui_status",
         # build
         "import_meshes",
+        "import_cad",
         "set_base_link",
         "rename_link",
         "remove_link",
