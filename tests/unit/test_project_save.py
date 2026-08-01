@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -111,3 +112,65 @@ def test_save_preserves_full_inertial_override(tmp_path: Path) -> None:
     assert ov.mass == 3.0
     assert np.allclose(ov.com, np.array([0.1, 0.2, 0.3]))
     assert np.allclose(ov.inertia, np.eye(3) * 0.5)
+
+
+def test_save_bundles_existing_meshes_and_loads_them_relative_to_project(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "session" / "body.stl"
+    source.parent.mkdir()
+    source.write_text("temporary tessellation")
+    robot = _robot()
+    robot.links["base"] = replace(
+        robot.links["base"],
+        visual_mesh_path=source,
+        collision_mesh_path=source,
+    )
+    project = tmp_path / "saved" / "robot.cad2urdf"
+
+    save_project(robot, project)
+    source.unlink()
+    loaded = load_project(project)
+
+    visual = loaded.links["base"].visual_mesh_path
+    collision = loaded.links["base"].collision_mesh_path
+    assert visual == collision
+    assert visual is not None
+    assert visual.read_text() == "temporary tessellation"
+    assert visual.parent == project.parent / "robot_assets"
+
+
+def test_failed_json_commit_restores_previous_asset_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = tmp_path / "first.stl"
+    first.write_text("first mesh")
+    robot = _robot()
+    robot.links["base"] = replace(
+        robot.links["base"], visual_mesh_path=first, collision_mesh_path=first
+    )
+    project = tmp_path / "robot.cad2urdf"
+    save_project(robot, project)
+
+    second = tmp_path / "second.stl"
+    second.write_text("second mesh")
+    robot.links["base"] = replace(
+        robot.links["base"], visual_mesh_path=second, collision_mesh_path=second
+    )
+    original_replace = Path.replace
+
+    def fail_json_commit(source: Path, target: Path) -> Path:
+        if source.suffix == ".tmp" and target == project:
+            raise OSError("simulated JSON commit failure")
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", fail_json_commit)
+
+    with pytest.raises(OSError, match="JSON commit failure"):
+        save_project(robot, project)
+
+    loaded = load_project(project)
+    visual = loaded.links["base"].visual_mesh_path
+    assert visual is not None
+    assert visual.read_text() == "first mesh"
+    assert not list(tmp_path.glob(".*_backup_*"))

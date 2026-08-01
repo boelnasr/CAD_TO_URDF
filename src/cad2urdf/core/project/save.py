@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -131,10 +133,74 @@ def robot_to_payload(robot: Robot) -> dict[str, Any]:
 
 
 def save_project(robot: Robot, path: Path) -> None:
-    """Serialize ``robot`` to a .cad2urdf JSON file at ``path``."""
+    """Serialize ``robot`` and bundle every available mesh beside the project.
+
+    Generated CAD tessellations live in a GUI-owned temporary directory.  A
+    project must therefore take its own copy rather than retaining those
+    session paths.  Missing paths are left unchanged for backwards
+    compatibility with projects whose relative assets are supplied later.
+    """
     payload = robot_to_payload(robot)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    asset_dir = path.parent / f"{path.stem}_assets"
+    staging = Path(tempfile.mkdtemp(prefix=f".{asset_dir.name}_", dir=path.parent))
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{path.name}_", suffix=".tmp", dir=path.parent, delete=False
+    ) as json_file:
+        json_staging = Path(json_file.name)
+    copied: dict[Path, Path] = {}
+    copied_any = False
+    backup_parent: Path | None = None
+    backup_assets: Path | None = None
+    assets_installed = False
+    try:
+        for link in payload["links"]:
+            for field in ("visual_mesh_path", "collision_mesh_path"):
+                raw = link[field]
+                if raw is None:
+                    continue
+                source = Path(raw)
+                if not source.is_file():
+                    continue
+                source = source.resolve()
+                relative = copied.get(source)
+                if relative is None:
+                    suffix = source.suffix or ".mesh"
+                    relative = Path(f"{len(copied) + 1:04d}{suffix}")
+                    shutil.copy2(source, staging / relative)
+                    copied[source] = relative
+                link[field] = str(Path(asset_dir.name) / relative)
+                copied_any = True
+
+        # Fully materialize the new JSON before changing the live asset tree.
+        # The final Path.replace calls are same-filesystem atomic renames.
+        json_staging.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        if copied_any:
+            if asset_dir.exists():
+                backup_parent = Path(
+                    tempfile.mkdtemp(prefix=f".{asset_dir.name}_backup_", dir=path.parent)
+                )
+                backup_assets = backup_parent / asset_dir.name
+                asset_dir.replace(backup_assets)
+            staging.replace(asset_dir)
+            assets_installed = True
+        else:
+            shutil.rmtree(staging)
+        json_staging.replace(path)
+    except Exception:
+        # If either the asset install or JSON commit fails, restore the prior
+        # asset tree so the previously saved project remains internally valid.
+        if assets_installed and asset_dir.exists():
+            shutil.rmtree(asset_dir, ignore_errors=True)
+        if backup_assets is not None and backup_assets.exists():
+            backup_assets.replace(asset_dir)
+        if backup_parent is not None:
+            shutil.rmtree(backup_parent, ignore_errors=True)
+        shutil.rmtree(staging, ignore_errors=True)
+        json_staging.unlink(missing_ok=True)
+        raise
+    if backup_parent is not None:
+        shutil.rmtree(backup_parent, ignore_errors=True)
 
 
 def load_project(path: Path) -> Robot:
@@ -143,9 +209,18 @@ def load_project(path: Path) -> Robot:
         raise FileNotFoundError(f"project file not found: {path}")
     payload = json.loads(path.read_text())
     payload = _migrate_payload(payload)
-    return Robot(
+    robot = Robot(
         name=payload["name"],
         base_link=payload["base_link"],
         links={d["name"]: _link_from_dict(d) for d in payload["links"]},
         joints={d["name"]: _joint_from_dict(d) for d in payload["joints"]},
     )
+    # Project mesh references are relative to the project, not the process's
+    # current working directory.  Absolute paths from older schema-v1 files
+    # continue to work unchanged.
+    for link in robot.links.values():
+        for field in ("visual_mesh_path", "collision_mesh_path"):
+            mesh_path = getattr(link, field)
+            if mesh_path is not None and not mesh_path.is_absolute():
+                object.__setattr__(link, field, path.parent / mesh_path)
+    return robot

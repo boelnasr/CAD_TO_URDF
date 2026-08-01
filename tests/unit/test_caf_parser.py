@@ -105,3 +105,43 @@ def test_shape_side_map_stays_outside_robot_project_round_trip(tmp_path: Path) -
     assert set(loaded.links) == {"robot", "base", "arm"}
     assert not _contains_topods_shape(robot)
     assert not _contains_topods_shape(loaded)
+
+
+def test_repeated_component_definitions_create_distinct_occurrences(tmp_path: Path) -> None:
+    """Two placements of one XCAF definition must become two Robot candidates."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Trsf, gp_Vec
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    from cad2urdf.core.parsers.caf import load_caf_assembly
+
+    class RepeatedReader:
+        def ReadFile(self, _path: str):  # noqa: N802
+            return IFSelect_RetDone
+
+        def Transfer(self, doc):  # noqa: N802
+            tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+            bolt = tool.AddShape(BRepPrimAPI_MakeBox(2.0, 2.0, 10.0).Shape(), False)
+            TDataStd_Name.Set_s(bolt, TCollection_ExtendedString("bolt"))
+            assembly = tool.NewShape()
+            TDataStd_Name.Set_s(assembly, TCollection_ExtendedString("fixture"))
+            tool.AddComponent(assembly, bolt, TopLoc_Location(gp_Trsf()))
+            moved = gp_Trsf()
+            moved.SetTranslation(gp_Vec(20.0, 0.0, 0.0))
+            tool.AddComponent(assembly, bolt, TopLoc_Location(moved))
+            tool.UpdateAssemblies()
+
+    source = tmp_path / "repeated.step"
+    source.touch()
+    assembly, shapes = load_caf_assembly(path=source, reader_factory=RepeatedReader)
+
+    leaves = [part for part in assembly.parts if part.is_leaf]
+    assert [part.id for part in leaves] == ["bolt", "bolt_2"]
+    assert set(shapes) == {"bolt", "bolt_2"}
+    assert [edge.child_id for edge in assembly.edges] == ["bolt", "bolt_2"]
+    assert assembly.edges[0].relative_pose[0, 3] == pytest.approx(0.0)
+    assert assembly.edges[1].relative_pose[0, 3] == pytest.approx(0.02)

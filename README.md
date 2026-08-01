@@ -233,12 +233,10 @@ flowchart LR
 - **Export** a full ROS 2 ament package (`Export → Export ROS Package`) or save a
   `.cad2urdf` project.
 
-> **CAD project warning.** Tessellated meshes from a CAD import live in a
-> session temporary directory that is removed when the document is replaced or
-> the app exits. Schema-v1 project files only save paths to those meshes, so a
-> project saved from a CAD import is not durably reopenable after exit. Review
-> and export the ROS package in the same session. A future schema is needed for
-> self-contained CAD asset bundles.
+> **CAD project assets.** Saving a project copies all available referenced
+> meshes into a `<project-name>_assets` directory beside the `.cad2urdf` file.
+> Keep that directory with the project when moving or sharing it; paths inside
+> the project are resolved relative to the project file when it is reopened.
 
 > **Inputs.** The GUI imports `.stl` / `.obj` meshes (one file per link) and, with
 > the `[step]` extra installed, full STEP (`.step` / `.stp`) and IGES (`.iges` /
@@ -601,12 +599,11 @@ The CLI is stateless, but `core/project/save.py` exposes `save_project(robot, pa
 
 Schema migrations live in a `_MIGRATIONS: dict[(int,int), Callable]` registry — empty in v1, populated when `SCHEMA_VERSION` bumps. Loading an unsupported version raises with a pointer to the registry file.
 
-> **Schema-v1 CAD asset limitation.** A project file stores mesh paths; it does
-> not embed or bundle the referenced assets. CAD-import tessellations live in a
-> session temporary directory and are removed when the document is replaced or
-> the GUI exits. Consequently, a project saved from a CAD import is not durably
-> reopenable after exit. Review and export within the current session. Durable,
-> self-contained CAD asset bundles require a future schema.
+> **Schema-v1 CAD assets.** The JSON stores mesh paths rather than embedding
+> binary mesh data. On save, available meshes are copied into a sibling
+> `<project-name>_assets` directory and recorded as project-relative paths, so
+> CAD imports remain reopenable after the GUI's temporary import directory is
+> cleaned up. Move or share the JSON and its asset directory together.
 
 ---
 

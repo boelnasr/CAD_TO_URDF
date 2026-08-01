@@ -147,23 +147,11 @@ def load_caf_assembly(
     edges: list[AssemblyEdge] = []
     shapes: dict[str, Any] = {}
     used: set[str] = set()
-    id_for: dict[str, str] = {}
-
-    def entry(label: Any) -> str:
-        from OCP.TCollection import TCollection_AsciiString
-        from OCP.TDF import TDF_Tool
-
-        value = TCollection_AsciiString()
-        TDF_Tool.Entry_s(label, value)
-        return str(value.ToCString())
-
     def visit(label: Any, *, localize_shape: bool = False) -> str:
-        key = entry(label)
-        if key in id_for:
-            return id_for[key]
-
+        # Deliberately create a node for each visit. XCAF component labels are
+        # occurrences: several components may refer to the same definition but
+        # have different placements, and a Robot needs one link per occurrence.
         node_id = _sanitize(_name_of(label), used)
-        id_for[key] = node_id
         is_assembly = tool.IsAssembly_s(label)
         mesh = None
         if not is_assembly:
