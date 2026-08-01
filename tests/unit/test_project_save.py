@@ -111,3 +111,31 @@ def test_save_preserves_full_inertial_override(tmp_path: Path) -> None:
     assert ov.mass == 3.0
     assert np.allclose(ov.com, np.array([0.1, 0.2, 0.3]))
     assert np.allclose(ov.inertia, np.eye(3) * 0.5)
+
+
+def test_save_bundles_existing_meshes_and_loads_them_relative_to_project(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "session" / "body.stl"
+    source.parent.mkdir()
+    source.write_text("temporary tessellation")
+    robot = _robot()
+    robot.links["base"] = Link(
+        **{
+            **robot.links["base"].__dict__,
+            "visual_mesh_path": source,
+            "collision_mesh_path": source,
+        }
+    )
+    project = tmp_path / "saved" / "robot.cad2urdf"
+
+    save_project(robot, project)
+    source.unlink()
+    loaded = load_project(project)
+
+    visual = loaded.links["base"].visual_mesh_path
+    collision = loaded.links["base"].collision_mesh_path
+    assert visual == collision
+    assert visual is not None
+    assert visual.read_text() == "temporary tessellation"
+    assert visual.parent == project.parent / "robot_assets"
