@@ -2,7 +2,7 @@
 
 Convert CAD assemblies into ROS 2-ready URDF packages.
 
-[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-435%20passed-brightgreen)](#development) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v1.0.0-brightgreen)](#status--roadmap)
+[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-436%20passed-brightgreen)](#development) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v1.0.0-brightgreen)](#status--roadmap)
 
 `cad2urdf` takes mesh files (STL or OBJ) plus a YAML joint description, or a
 STEP/IGES assembly (`.stp`/`.step`/`.igs`/`.iges`, via the `[step]` extra) whose
@@ -617,7 +617,7 @@ Schema migrations live in a `_MIGRATIONS: dict[(int,int), Callable]` registry â€
 
 ```bash
 unset PYTHONPATH AMENT_PREFIX_PATH    # strip ROS leakage
-pytest                                # 435 passing unit + integration + GUI tests
+pytest                                # 436 passing unit + integration + GUI tests
 pytest -m slow                        # ManipulaPy validation tests (need [urdf-io])
 ```
 

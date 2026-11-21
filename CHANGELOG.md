@@ -22,6 +22,9 @@ follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Inertia: `scipy` is now a core dependency. The convex-hull fallback for
+  non-watertight meshes needs it, and default installs without it silently gave
+  those links zero mass (#30).
 - STEP/IGES: reversed B-rep faces are wound outward, so mass, COM and inertia are
   correct for parts modelled away from their own origin (#2).
 - Inertia: inside-out watertight meshes are inverted and inconsistently wound

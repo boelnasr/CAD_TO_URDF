@@ -38,3 +38,13 @@ def test_urdf_io_extra_requires_manipulapy_1_4_2_issue18():
     spec = manipulapy[0].specifier
     assert not spec.contains("1.4.1")
     assert spec.contains("1.4.2")
+
+
+def test_core_dependencies_include_scipy_for_hull_fallback_issue30():
+    """compute_inertial's convex-hull fallback runs through trimesh, which needs
+    scipy.spatial; without it every non-watertight mesh silently gets zero mass.
+    It must not depend on an optional extra (ManipulaPy) happening to pull it in."""
+    from packaging.requirements import Requirement
+
+    names = {Requirement(dep).name.lower() for dep in _pyproject()["project"]["dependencies"]}
+    assert "scipy" in names
