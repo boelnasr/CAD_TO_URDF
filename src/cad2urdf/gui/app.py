@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication, QWidget
 
 
@@ -54,6 +56,15 @@ def main(argv: list[str] | None = None) -> int:
         server = ControlServer(dispatcher, ns.control_socket)
         win.set_control_server(server)
         server.start()
+
+    # cad2urdf-mcp stops this child with SIGTERM. Quitting the event loop
+    # (instead of dying) lets the finally block remove the CAD session assets.
+    signal.signal(signal.SIGTERM, lambda *_: app.quit())
+    # Python runs signal handlers only between bytecodes, never while
+    # app.exec() is blocked in C++; a periodic Python slot gives it the chance.
+    signal_pump = QTimer()
+    signal_pump.timeout.connect(lambda: None)
+    signal_pump.start(200)
 
     try:
         return app.exec()

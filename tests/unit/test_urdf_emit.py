@@ -330,3 +330,56 @@ def test_emit_urdf_rejects_mesh_path_with_dotdot(tmp_path: Path) -> None:
     out = tmp_path / "robot.urdf"
     with pytest.raises(ValueError, match=r"must not contain '\.\.' segments"):
         emit_urdf(robot, out, package_name="p")
+
+
+def test_emit_urdf_inertial_round_trips_thin_plate_issue23(tmp_path: Path) -> None:
+    """A 0.3 mm steel sheet has Ixx + Iyy only ~3e-9 kg*m^2 above Izz, so
+    rounding each diagonal term to 6 significant digits flips the triangle
+    inequality and simulators reject the tensor. Inertial values must round-trip."""
+    import trimesh
+
+    from cad2urdf.core.inertia.compute import compute_inertial
+
+    plate = trimesh.creation.box(extents=[0.25, 0.31, 0.0003])  # metres
+    mass, com, inertia = compute_inertial(plate, 7850.0, InertialOverride())
+    link = Link(
+        name="plate",
+        visual_mesh_path=Path("meshes/visual/plate.stl"),
+        collision_mesh_path=Path("meshes/collision/plate.stl"),
+        material_density=7850.0,
+        material_name="steel_1018",
+        inertial_override=InertialOverride(mass=mass, com=com, inertia=inertia),
+        origin=np.eye(4),
+    )
+    out = tmp_path / "plate.urdf"
+    emit_urdf(Robot("r", "plate", {"plate": link}, {}), out, package_name="pkg")
+
+    inertial = ET.parse(out).getroot().find("link/inertial")
+    assert inertial is not None
+    i_el = inertial.find("inertia")
+    m_el = inertial.find("mass")
+    o_el = inertial.find("origin")
+    assert i_el is not None and m_el is not None and o_el is not None
+    ixx, iyy, izz = (float(i_el.attrib[k]) for k in ("ixx", "iyy", "izz"))
+    assert ixx + iyy - izz >= 0.0
+    emitted = {
+        "ixx": ixx,
+        "ixy": float(i_el.attrib["ixy"]),
+        "ixz": float(i_el.attrib["ixz"]),
+        "iyy": iyy,
+        "iyz": float(i_el.attrib["iyz"]),
+        "izz": izz,
+    }
+    expected = {
+        "ixx": inertia[0, 0],
+        "ixy": inertia[0, 1],
+        "ixz": inertia[0, 2],
+        "iyy": inertia[1, 1],
+        "iyz": inertia[1, 2],
+        "izz": inertia[2, 2],
+    }
+    for key, value in expected.items():
+        assert emitted[key] == pytest.approx(value, rel=1e-12, abs=0.0), key
+    assert float(m_el.attrib["value"]) == pytest.approx(mass, rel=1e-12, abs=0.0)
+    emitted_com = [float(v) for v in o_el.attrib["xyz"].split()]
+    assert emitted_com == pytest.approx(list(com), rel=1e-12, abs=0.0)

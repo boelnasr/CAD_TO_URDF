@@ -107,11 +107,23 @@ def remove_link(robot: Robot, link_name: str) -> Robot:
 
 
 def reparent_joint(robot: Robot, joint_name: str, new_parent: str) -> Robot:
-    """Change a joint's parent link. Caller is responsible for cycle-avoidance."""
+    """Change a joint's parent link.
+
+    Raises ValueError if ``new_parent`` lies in the joint child's subtree,
+    because that would close a kinematic loop.
+    """
     if joint_name not in robot.joints:
         raise ValueError(f"joint {joint_name!r} not in robot")
     if new_parent not in robot.links:
         raise ValueError(f"new parent {new_parent!r} not in robot")
+    child = robot.joints[joint_name].child
+    # Checked here, not only in the GUI drag handler, so every caller (MCP
+    # update_joint included) is protected from committing a cyclic tree.
+    if new_parent in descendants_of(robot, child):
+        raise ValueError(
+            f"reparenting joint {joint_name!r} under {new_parent!r} would create a cycle "
+            f"({new_parent!r} is in the subtree of {child!r})"
+        )
 
     new = deepcopy(robot)
     j = new.joints[joint_name]
@@ -133,8 +145,12 @@ def reparent_joint(robot: Robot, joint_name: str, new_parent: str) -> Robot:
 def set_base_link(robot: Robot, new_base: str) -> Robot:
     """Re-root the tree at ``new_base`` by reversing joints along the path to the old base.
 
-    Exact for fixed joints; for actuated joints the axis vector is preserved
-    (motion sign may flip). Re-root before assigning joint types/axes.
+    Each reversed joint gets the inverse origin and its axis re-expressed in
+    the new child frame (the old parent frame) and negated, so the same joint
+    coordinate q yields the inverse motion and the limits carry over unchanged.
+    This is exact for fixed and prismatic joints, and for revolute/continuous
+    joints whenever the origin translation lies on the axis line, which always
+    holds for CAD-inferred joints.
     """
     if new_base not in robot.links:
         raise ValueError(f"link {new_base!r} not in robot")
@@ -143,8 +159,14 @@ def set_base_link(robot: Robot, new_base: str) -> Robot:
 
     # Path from new_base up to the current base via parent links.
     path: list[str] = []
+    visited: set[str] = set()
     cur: str | None = new_base
     while cur is not None:
+        # A malformed (cyclic) graph would otherwise loop forever on the Qt
+        # main thread and freeze the GUI and any waiting MCP client.
+        if cur in visited:
+            raise ValueError(f"cycle detected while walking parents of {new_base!r} at {cur!r}")
+        visited.add(cur)
         path.append(cur)
         cur = parent_of(robot, cur)
     if path[-1] != robot.base_link:
@@ -157,12 +179,15 @@ def set_base_link(robot: Robot, new_base: str) -> Robot:
             jn for jn, j in work.joints.items() if j.parent == parent and j.child == child
         )
         j = work.joints[jname]
+        # URDF axes live in the joint (child) frame. After reversal the child is
+        # the old parent, so rotate the axis into that frame; negating it makes
+        # T_rev(q) == inv(T_fwd(q)), matching extract/spanning_tree.py.
         work.joints[jname] = Joint(
             name=j.name,
             type=j.type,
             parent=child,
             child=parent,
-            axis=j.axis,
+            axis=-(j.origin[:3, :3] @ j.axis),
             origin=np.linalg.inv(j.origin),
             limit_lower=j.limit_lower,
             limit_upper=j.limit_upper,

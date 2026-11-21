@@ -163,3 +163,121 @@ def test_controller_replace_enables_undo(qtbot) -> None:
     win.controller.replace(r)
     win.controller.apply(lambda rr: remove_link(rr, "c"), label="rm c")
     assert win.action_undo.isEnabled()
+
+
+def test_validate_action_ignores_clicks_while_running_issue13(qtbot, monkeypatch) -> None:
+    """A second click used to drop the only reference to a running QThread (SIGABRT)."""
+    import threading
+
+    import cad2urdf.gui.workers.validate as validate_mod
+    from cad2urdf.gui.windows.main_window import MainWindow
+
+    release = threading.Event()
+    started: list[int] = []
+
+    def fake_build_validate_job(**_kwargs):
+        def job(_report):
+            started.append(1)
+            release.wait(5)
+            return validate_mod.ValidateReport(urdf_written=True)
+
+        return job
+
+    monkeypatch.setattr(validate_mod, "build_validate_job", fake_build_validate_job)
+    win = MainWindow()
+    qtbot.addWidget(win)
+
+    win.action_validate.trigger()
+    try:
+        assert not win.action_validate.isEnabled()
+        win.action_validate.trigger()
+    finally:
+        release.set()
+        qtbot.waitUntil(
+            lambda: win.statusBar().currentMessage().startswith("validation OK"), timeout=5000
+        )
+
+    assert started == [1]
+    assert win.action_validate.isEnabled()
+
+
+def test_validate_action_re_enabled_after_failure_issue13(qtbot, monkeypatch) -> None:
+    import cad2urdf.gui.workers.validate as validate_mod
+    from cad2urdf.gui.windows.main_window import MainWindow
+
+    def failing_build_validate_job(**_kwargs):
+        def job(_report):
+            raise RuntimeError("boom")
+
+        return job
+
+    monkeypatch.setattr(validate_mod, "build_validate_job", failing_build_validate_job)
+    win = MainWindow()
+    qtbot.addWidget(win)
+
+    win.action_validate.trigger()
+    qtbot.waitUntil(
+        lambda: win.statusBar().currentMessage().startswith("validate failed"), timeout=5000
+    )
+
+    assert win.action_validate.isEnabled()
+
+
+def test_validate_succeeds_for_robot_name_invalid_as_ros_package_issue22(
+    qtbot, monkeypatch, base_stl
+) -> None:
+    """The scratch package is internal; 'UR5' is a fine robot name but not a ROS package name."""
+    import cad2urdf.gui.workers.validate as validate_mod
+    from cad2urdf.gui.dialogs.import_meshes import run_import_into_controller
+    from cad2urdf.gui.windows.main_window import MainWindow
+
+    real_build_validate_job = validate_mod.build_validate_job
+
+    def without_manipulapy(**kwargs):
+        # The ManipulaPy import is slow and irrelevant to the package-name check.
+        return real_build_validate_job(**{**kwargs, "run_manipulapy": False})
+
+    monkeypatch.setattr(validate_mod, "build_validate_job", without_manipulapy)
+    win = MainWindow()
+    qtbot.addWidget(win)
+    run_import_into_controller(controller=win.controller, mesh_paths=[base_stl], robot_name="UR5")
+
+    win.action_validate.trigger()
+    qtbot.waitUntil(
+        lambda: not win.statusBar().currentMessage().startswith("validating"), timeout=10000
+    )
+
+    assert win.statusBar().currentMessage().startswith("validation OK")
+
+
+@pytest.mark.parametrize("outcome", ["finished", "failed"])
+def test_validate_removes_scratch_dir_issue28(qtbot, monkeypatch, tmp_path, outcome) -> None:
+    """Each Validate click used to leak one cad2urdf_validate_* temp directory."""
+    import tempfile
+
+    import cad2urdf.gui.workers.validate as validate_mod
+    from cad2urdf.gui.windows.main_window import MainWindow
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    out_dirs: list = []
+
+    def fake_build_validate_job(*, out_dir, **_kwargs):
+        out_dirs.append(out_dir)
+
+        def job(_report):
+            (out_dir / "robot.urdf").write_text("<robot/>")
+            if outcome == "failed":
+                raise RuntimeError("boom")
+            return validate_mod.ValidateReport(urdf_written=True)
+
+        return job
+
+    monkeypatch.setattr(validate_mod, "build_validate_job", fake_build_validate_job)
+    win = MainWindow()
+    qtbot.addWidget(win)
+
+    win.action_validate.trigger()
+    qtbot.waitUntil(win.action_validate.isEnabled, timeout=5000)
+
+    assert out_dirs and out_dirs[0].parent == tmp_path  # scratch was under tmp_path
+    assert list(tmp_path.glob("cad2urdf_validate_*")) == []

@@ -39,6 +39,16 @@ def _materialize_link_into_pkg(link: Link, out_dir: Path) -> Link:
     if visual_src is None or not visual_src.is_absolute() or not visual_src.is_file():
         return link  # frame link, already package-relative, or missing — leave untouched
 
+    # The link name becomes a filename and is written before emit_urdf's
+    # package:// guard runs, and names arrive unchecked from rename_link, MCP
+    # and .cad2urdf files, so reject anything that is not one path component.
+    name = link.name
+    if Path(name).name != name or name in {".", ".."} or "\\" in name:
+        raise ValueError(
+            f"link name {name!r} cannot be used as a mesh filename "
+            "(path separators and '.'/'..' are not allowed)"
+        )
+
     visual_rel = Path("meshes/visual") / f"{link.name}.stl"
     collision_rel = Path("meshes/collision") / f"{link.name}.stl"
     visual_dst = out_dir / visual_rel

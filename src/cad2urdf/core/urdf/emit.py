@@ -19,6 +19,17 @@ def _format_xyz(v: NDArray[Any]) -> str:
     return " ".join(f"{x:g}" for x in v.tolist())
 
 
+def _num(x: float) -> str:
+    """Shortest string that parses back to exactly `x`.
+
+    Inertial terms need full precision: for thin plates Ixx + Iyy exceeds Izz
+    only around the 7th significant digit, so `%g` rounding can flip the
+    triangle inequality, which simulators reject. Origins/axes keep `%g`.
+    """
+    r = repr(float(x))
+    return r[:-2] if r.endswith(".0") else r
+
+
 def _origin_xyz_rpy(m: NDArray[Any]) -> tuple[str, str]:
     """Decompose a 4x4 homogeneous transform into URDF xyz + roll-pitch-yaw strings."""
     xyz = m[:3, 3]
@@ -56,18 +67,19 @@ def _emit_inertial(parent: ET.Element, link: Link) -> None:
         mass, com, inertia = ov.mass, ov.com, ov.inertia
 
     el = ET.SubElement(parent, "inertial")
-    ET.SubElement(el, "origin", attrib={"xyz": _format_xyz(com), "rpy": "0 0 0"})
-    ET.SubElement(el, "mass", attrib={"value": f"{mass:g}"})
+    com_xyz = " ".join(_num(x) for x in com.tolist())
+    ET.SubElement(el, "origin", attrib={"xyz": com_xyz, "rpy": "0 0 0"})
+    ET.SubElement(el, "mass", attrib={"value": _num(mass)})
     ET.SubElement(
         el,
         "inertia",
         attrib={
-            "ixx": f"{inertia[0, 0]:g}",
-            "ixy": f"{inertia[0, 1]:g}",
-            "ixz": f"{inertia[0, 2]:g}",
-            "iyy": f"{inertia[1, 1]:g}",
-            "iyz": f"{inertia[1, 2]:g}",
-            "izz": f"{inertia[2, 2]:g}",
+            "ixx": _num(inertia[0, 0]),
+            "ixy": _num(inertia[0, 1]),
+            "ixz": _num(inertia[0, 2]),
+            "iyy": _num(inertia[1, 1]),
+            "iyz": _num(inertia[1, 2]),
+            "izz": _num(inertia[2, 2]),
         },
     )
 

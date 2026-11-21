@@ -98,3 +98,38 @@ def test_compute_does_not_mutate_input_mesh_density() -> None:
     cube.density = 1000.0
     compute_inertial(cube, density=2700.0, override=InertialOverride())
     assert cube.density == 1000.0
+
+
+def test_inside_out_watertight_mesh_is_inverted_not_negative_issue21() -> None:
+    """A mirrored/inside-out export must give the true positive mass, not -m."""
+    cube = trimesh.creation.box(extents=(0.1, 0.1, 0.1))
+    inside_out = cube.copy()
+    inside_out.invert()
+    faces_before = inside_out.faces.copy()
+    assert inside_out.is_watertight and inside_out.volume < 0
+
+    mass, com, inertia = compute_inertial(inside_out, density=2700.0, override=InertialOverride())
+
+    assert np.isclose(mass, 2.7, rtol=1e-6)
+    assert np.allclose(com, 0.0, atol=1e-12)
+    assert np.allclose(np.diag(inertia), 2.7 * 0.1**2 / 6.0, rtol=1e-3)
+    # The caller's mesh must keep its own winding.
+    assert np.array_equal(inside_out.faces, faces_before)
+
+
+def test_inconsistent_winding_falls_back_to_convex_hull_issue21(caplog) -> None:
+    """Watertight but inconsistently wound meshes must not be integrated as-is."""
+    import logging
+
+    cube = trimesh.creation.box(extents=(0.1, 0.1, 0.1))
+    faces = cube.faces.copy()
+    faces[:2] = faces[:2, ::-1]
+    flipped = trimesh.Trimesh(cube.vertices, faces, process=False)
+    assert flipped.is_watertight and not flipped.is_winding_consistent
+
+    with caplog.at_level(logging.WARNING):
+        mass, com, _ = compute_inertial(flipped, density=2700.0, override=InertialOverride())
+
+    assert np.isclose(mass, 2.7, rtol=1e-6)
+    assert np.allclose(com, 0.0, atol=1e-12)
+    assert any("convex hull" in rec.message for rec in caplog.records)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from xml.sax.saxutils import escape as _xml_escape
@@ -88,6 +89,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.substitutions import Command
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -95,7 +97,9 @@ def generate_launch_description():
     urdf_path = pkg_share / "{urdf_relpath}"
     rviz_path = pkg_share / "rviz" / "display.rviz"
 
-    robot_description = Command(["xacro ", str(urdf_path)])
+    # value_type=str stops launch_ros from YAML-parsing the URDF text, which
+    # fails for link names containing YAML syntax such as ": " or " #".
+    robot_description = ParameterValue(Command(["xacro ", str(urdf_path)]), value_type=str)
 
     return LaunchDescription([
         Node(
@@ -181,6 +185,8 @@ def scaffold_ros_package(
     (out_dir / "launch" / "display.launch.py").write_text(
         LAUNCH_PY.format(package_name=package_name, urdf_relpath=urdf_relpath.as_posix())
     )
+    # Link names come from file stems and may contain YAML syntax (" #", ": ");
+    # a JSON string is a valid double-quoted YAML scalar, ASCII-only by default.
     (out_dir / "rviz" / "display.rviz").write_text(
-        RVIZ_CONFIG.format(base_link_name=base_link_name)
+        RVIZ_CONFIG.format(base_link_name=json.dumps(base_link_name))
     )

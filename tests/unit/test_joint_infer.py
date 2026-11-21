@@ -267,3 +267,51 @@ def test_missing_or_invalid_shapes_never_raise_and_stay_fixed(shapes: dict[str, 
     assert inferred[0].mate_kind in {None, "unknown"}
     assert inferred[0].confidence < 0.6
     assert classify_from_hints(inferred)[0].joint_type == "fixed"
+
+
+@pytest.mark.parametrize(
+    ("guide", "block", "expected_parent", "expected_limits_m"),
+    [
+        # "rail" < "slider": the 100 mm guide becomes the parent.
+        ("rail", "slider", "rail", (-0.01, 0.07)),
+        # "carriage" < "rail": the 20 mm block becomes the parent, so the same
+        # travel must be reported from the guide's side.
+        ("rail", "carriage", "carriage", (-0.07, 0.01)),
+    ],
+)
+def test_sliding_travel_limits_do_not_depend_on_part_names_issue11(
+    guide: str,
+    block: str,
+    expected_parent: str,
+    expected_limits_m: tuple[float, float],
+) -> None:
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    from cad2urdf.core.extract.joint_infer import infer_assembly_edge_hints
+
+    # 100 mm square tube (10 mm bore) and a 20 mm block sitting at z = 10..30 mm.
+    tube = BRepAlgoAPI_Cut(
+        BRepPrimAPI_MakeBox(20.0, 20.0, 100.0).Shape(),
+        BRepPrimAPI_MakeBox(gp_Pnt(5.0, 5.0, 0.0), 10.0, 10.0, 100.0).Shape(),
+    ).Shape()
+    box = BRepPrimAPI_MakeBox(10.0, 10.0, 20.0).Shape()
+    block_pose = np.eye(4)
+    block_pose[:3, 3] = [0.005, 0.005, 0.010]
+    edges = [
+        AssemblyEdge(parent_id="axis", child_id=guide, relative_pose=np.eye(4)),
+        AssemblyEdge(parent_id="axis", child_id=block, relative_pose=block_pose),
+    ]
+
+    classified = classify_from_hints(
+        infer_assembly_edge_hints(edges, {guide: tube, block: box})
+    )
+
+    prismatic = [joint for joint in classified if joint.joint_type == "prismatic"]
+    assert len(prismatic) == 1
+    joint = prismatic[0]
+    assert joint.parent_id == expected_parent
+    assert joint.limit_lower is not None and joint.limit_upper is not None
+    assert joint.limit_upper - joint.limit_lower == pytest.approx(0.08, abs=1e-6)
+    assert (joint.limit_lower, joint.limit_upper) == pytest.approx(expected_limits_m, abs=1e-6)

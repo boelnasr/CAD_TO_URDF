@@ -2,7 +2,7 @@
 
 Convert CAD assemblies into ROS 2-ready URDF packages.
 
-[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-385%20passed-brightgreen)](#development) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v1.0.0-brightgreen)](#status--roadmap)
+[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-436%20passed-brightgreen)](#development) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v1.0.0-brightgreen)](#status--roadmap)
 
 `cad2urdf` takes mesh files (STL or OBJ) plus a YAML joint description, or a
 STEP/IGES assembly (`.stp`/`.step`/`.igs`/`.iges`, via the `[step]` extra) whose
@@ -79,9 +79,11 @@ pip install -e ".[dev,urdf-io]"
 ```
 
 Adds the user's [ManipulaPy](https://github.com/boelnasr/ManipulaPy) library
-(~3 GB transitive deps including PyTorch + CUDA wheels), enabling the post-emit
-URDF validation gate. Without this extra, the CLI's `--no-validate` flag is
-required (or you get a clean "ManipulaPy not installed" message and continue).
+(>= 1.4.2; its core deps are numpy, scipy, matplotlib, numba and pillow), enabling
+the post-emit URDF validation gate. Older releases printed a banner to stdout on
+import, which breaks the MCP server's JSON-RPC stream. Without this extra, the
+CLI's `--no-validate` flag is required (or you get a clean "ManipulaPy not
+installed" message and continue).
 
 ### ROS 2 Humble PYTHONPATH gotcha
 
@@ -235,6 +237,8 @@ flowchart LR
 
 > **CAD project assets.** Saving a project copies all available referenced
 > meshes into a `<project-name>_assets` directory beside the `.cad2urdf` file.
+> If a folder with that name already exists and cad2urdf did not create it,
+> saving stops with an error instead of replacing it.
 > Keep that directory with the project when moving or sharing it; paths inside
 > the project are resolved relative to the project file when it is reopened.
 
@@ -613,17 +617,18 @@ Schema migrations live in a `_MIGRATIONS: dict[(int,int), Callable]` registry â€
 
 ```bash
 unset PYTHONPATH AMENT_PREFIX_PATH    # strip ROS leakage
-pytest                                # 385 passing unit + integration + GUI tests
+pytest                                # 436 passing unit + integration + GUI tests
 pytest -m slow                        # ManipulaPy validation tests (need [urdf-io])
 ```
 
 ### Type-check
 
 ```bash
-mypy                                  # strict mode on src/cad2urdf/core/
+mypy                                  # strict mode on src/cad2urdf/{core,gui,mcp}/
 ```
 
-The type checker is clean on every committed revision; CI enforces this gate.
+`gui/` is checked with a few error codes relaxed for PyQt6 stub noise (see the
+`[[tool.mypy.overrides]]` in `pyproject.toml`). CI enforces this gate.
 
 ### Continuous integration
 

@@ -67,7 +67,14 @@ def build_robot_from_tree(
     joints: dict[str, Joint] = {}
     for e in tree:
         pname, cname = by_id[e.parent_id].name, by_id[e.child_id].name
-        jn = f"{cname}_to_{pname}"
+        base_jn = f"{cname}_to_{pname}"
+        # Part names may themselves contain "_to_", so two different edges can
+        # generate the same name; overwriting would orphan a link.
+        jn = base_jn
+        n = 2
+        while jn in joints:
+            jn = f"{base_jn}_{n}"
+            n += 1
         needs_limits = e.joint_type in _LIMITED_JOINT_TYPES
         origin = np.asarray(e.relative_pose, dtype=float)
         axis_parent = np.asarray(e.axis, dtype=float)

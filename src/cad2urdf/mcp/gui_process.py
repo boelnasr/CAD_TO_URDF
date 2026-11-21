@@ -8,6 +8,15 @@ import sys
 import time
 
 
+def _stderr_target() -> int:
+    """Return a file descriptor for the child's stdout that is not our stdout."""
+    try:
+        return sys.stderr.fileno()
+    except (AttributeError, OSError, ValueError):
+        # sys.stderr may be replaced by an in-memory stream with no real fd.
+        return subprocess.DEVNULL
+
+
 class GuiProcess:
     """Launches `cad2urdf-gui --control-socket <path>` and waits for the socket."""
 
@@ -31,7 +40,14 @@ class GuiProcess:
         """Spawn the child and block until its socket accepts connections."""
         if self._proc is not None:
             raise RuntimeError("GUI process already started; call stop() first")
-        self._proc = subprocess.Popen(self._launch_cmd)
+        # The MCP stdio transport owns fd 0/1 as the JSON-RPC channel, so the
+        # child must not read its input or write native-library chatter (OCCT,
+        # VTK) into it. Send that chatter to stderr, where clients log it.
+        self._proc = subprocess.Popen(
+            self._launch_cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=_stderr_target(),
+        )
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self._proc.poll() is not None:

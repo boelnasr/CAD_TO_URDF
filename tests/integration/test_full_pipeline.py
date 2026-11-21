@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import trimesh
 
 from cad2urdf.cli.main import main
@@ -172,3 +173,39 @@ def test_step_input_returns_clear_error(tmp_path: Path, fixtures_dir: Path) -> N
         ]
     )
     assert rc == 2  # error exit code
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("a/link.stl", "b/link.stl"),
+        ("a/link.stl", "a/link.obj"),
+        # Distinct on ext4, but the same file on NTFS / APFS (and /mnt/c under WSL).
+        ("a/Link.stl", "b/link.stl"),
+    ],
+)
+def test_inputs_sharing_a_link_name_are_rejected_before_writing_issue12(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], first: str, second: str
+) -> None:
+    """Each STL/OBJ input becomes a link named after its stem, so two inputs with
+    the same (case-insensitive) stem would silently overwrite one mesh and drop a
+    link. That must be an error before anything is written."""
+    paths = []
+    for rel, size in ((first, 0.1), (second, 0.5)):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        trimesh.creation.box(extents=(size, size, size)).export(
+            str(path), file_type=path.suffix[1:]
+        )
+        paths.append(path)
+    joints = tmp_path / "joints.yaml"
+    joints.write_text("robot_name: r\nbase_link: link\njoints: []\n")
+    out_pkg = tmp_path / "pkg"
+
+    rc = main([*map(str, paths), "--joints", str(joints), "-o", str(out_pkg), "--no-validate"])
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert str(paths[0]) in err and str(paths[1]) in err
+    assert "link name" in err
+    assert not out_pkg.exists()

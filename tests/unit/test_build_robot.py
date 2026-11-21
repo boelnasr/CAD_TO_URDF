@@ -74,3 +74,37 @@ def test_build_robot_propagates_classified_joint_limits(tmp_path: Path) -> None:
     assert robot.joints["slider_to_base"].limit_upper == 0.07
     assert robot.joints["slider_to_base"].effort == 1.0
     assert robot.joints["slider_to_base"].velocity == 1.0
+
+
+def test_colliding_generated_joint_names_are_deduplicated_issue25(tmp_path: Path) -> None:
+    """Part names containing "_to_" must not make two edges share one joint name."""
+    from cad2urdf.core.kinematic.validate import validate_robot
+
+    parts = [
+        StepPart(id=n, name=n, mesh=None, is_leaf=False)
+        for n in ["root", "c", "b_to_c", "a_to_b", "a"]
+    ]
+    # (child "a_to_b", parent "c") and (child "a", parent "b_to_c") both
+    # generate "a_to_b_to_c".
+    tree = [
+        ClassifiedJoint(parent_id="root", child_id="c", joint_type="fixed"),
+        ClassifiedJoint(parent_id="root", child_id="b_to_c", joint_type="fixed"),
+        ClassifiedJoint(parent_id="c", child_id="a_to_b", joint_type="fixed"),
+        ClassifiedJoint(parent_id="b_to_c", child_id="a", joint_type="fixed"),
+    ]
+
+    robot = build_robot_from_tree(
+        parts=parts,
+        tree=tree,
+        base_id="root",
+        robot_name="x",
+        mesh_dir=tmp_path,
+        material=lookup("aluminum_6061"),
+    )
+
+    assert len(robot.joints) == len(tree)
+    assert {(j.parent, j.child) for j in robot.joints.values()} == {
+        (e.parent_id, e.child_id) for e in tree
+    }
+    assert all(name == joint.name for name, joint in robot.joints.items())
+    assert not [i for i in validate_robot(robot) if i.kind == "dangling_link"]

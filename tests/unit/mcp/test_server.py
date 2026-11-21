@@ -202,3 +202,90 @@ def test_screenshot_tool_returns_png_image(monkeypatch):
     img = mcp_server.screenshot()
     assert img.data == b"PNG"
     assert img._format == "png"
+
+
+class _FakeGuiProcess:
+    """Stands in for GuiProcess; `alive` flips to False when the GUI 'dies'."""
+
+    instances: list["_FakeGuiProcess"] = []
+
+    def __init__(self, socket_path, launch_cmd=None):
+        self.alive = False
+        self.stopped = False
+        _FakeGuiProcess.instances.append(self)
+
+    def start(self, *, timeout=30.0):
+        self.alive = True
+
+    def is_running(self):
+        return self.alive
+
+    def stop(self):
+        self.alive = False
+        self.stopped = True
+
+
+class _FakeLinkedClient:
+    """Socket client whose peer is the most recently started fake GUI."""
+
+    def __init__(self, socket_path):
+        self.gui = _FakeGuiProcess.instances[-1]
+        self.closed = False
+
+    def connect(self, *, timeout=10.0):
+        pass
+
+    def send(self, command, args):
+        if not self.gui.alive:
+            raise BrokenPipeError(32, "Broken pipe")
+        return {"ok": True, "result": {"running": True}}
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.fixture()
+def fake_gui_bridge(monkeypatch):
+    _FakeGuiProcess.instances = []
+    monkeypatch.setattr(mcp_server, "GuiProcess", _FakeGuiProcess)
+    monkeypatch.setattr(mcp_server, "ControlClient", _FakeLinkedClient)
+    bridge = mcp_server.Bridge()
+    yield bridge
+    bridge.shutdown()
+
+
+def test_call_reports_dead_gui_once_then_respawns_issue15(fake_gui_bridge):
+    bridge = fake_gui_bridge
+    assert bridge.call("gui_status", {}) == {"running": True}
+    first_gui = _FakeGuiProcess.instances[0]
+    first_client = bridge._client
+    first_gui.alive = False  # user closed the window / GUI crashed
+
+    # A silent respawn would hand the agent an empty document, so the loss is
+    # reported once (per the MCP design spec's "GUI not running" error)...
+    with pytest.raises(RuntimeError, match="GUI not running.*document is lost"):
+        bridge.call("gui_status", {})
+    assert len(_FakeGuiProcess.instances) == 1
+
+    # ...and the retry starts a fresh GUI.
+    assert bridge.call("gui_status", {}) == {"running": True}
+
+    assert len(_FakeGuiProcess.instances) == 2
+    assert first_gui.stopped
+    assert first_client.closed
+
+
+def test_call_reports_gui_not_running_when_send_fails_issue15(fake_gui_bridge):
+    bridge = fake_gui_bridge
+    bridge.call("gui_status", {})
+    gui = _FakeGuiProcess.instances[0]
+    # Race: the GUI dies after the liveness check but before the send.
+    gui.is_running = lambda: True
+    gui.alive = False
+
+    with pytest.raises(RuntimeError, match="GUI not running"):
+        bridge.call("gui_status", {})
+
+    # The bridge reset itself, so the next call spawns a fresh GUI.
+    assert bridge.call("gui_status", {}) == {"running": True}
+    assert len(_FakeGuiProcess.instances) == 2

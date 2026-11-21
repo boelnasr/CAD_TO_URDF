@@ -89,6 +89,15 @@ class InertiaEditorDock(QDockWidget):
         if link is None:
             self._clear()
             return
+        if (
+            link.visual_mesh_path is None
+            or link.material_density is None
+            or link.material_name is None
+        ):
+            # Frame links have no mesh or material to edit, and the Qt setters
+            # below reject None; a raise in this slot makes PyQt6 abort the GUI.
+            self._clear()
+            return
 
         self._link_name = link_name
         self.material_combo.setCurrentText(link.material_name)
@@ -103,6 +112,9 @@ class InertiaEditorDock(QDockWidget):
 
     def _clear(self) -> None:
         self._link_name = None
+        self.auto_mass_label.setText("-")
+        self.auto_com_label.setText("-")
+        self.auto_inertia_label.setText("-")
         self._body.setEnabled(False)
 
     def _on_apply_material(self) -> None:
@@ -171,7 +183,7 @@ class InertiaEditorDock(QDockWidget):
 
         link = self._controller.current().links[self._link_name]
         mesh_path = link.visual_mesh_path
-        if not mesh_path.is_absolute():
+        if mesh_path is None or not mesh_path.is_absolute():
             self._show_status("recompute needs an absolute mesh path", 6000)
             return
 

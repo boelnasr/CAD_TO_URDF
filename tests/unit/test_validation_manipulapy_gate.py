@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,39 @@ def test_missing_manipulapy_returns_clear_error(tmp_path: Path) -> None:
     assert report.ok is False
     assert report.error
     assert "manipulapy" in report.error.lower()
+
+
+def test_manipulapy_import_crash_returns_failed_report_issue27(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-ImportError raised while importing ManipulaPy (native-library
+    OSError, numba RuntimeError, banner UnicodeEncodeError) must not escape:
+    the CLI's catch-all would roll back the package it just wrote."""
+    fake_pkg = tmp_path / "fake" / "ManipulaPy"
+    fake_pkg.mkdir(parents=True)
+    (fake_pkg / "__init__.py").write_text("")
+    (fake_pkg / "urdf_processor.py").write_text(
+        'raise RuntimeError("simulated native-library failure at import")\n'
+    )
+    cached = [m for m in sys.modules if m == "ManipulaPy" or m.startswith("ManipulaPy.")]
+    for name in cached:
+        monkeypatch.delitem(sys.modules, name)  # restored at teardown
+    monkeypatch.syspath_prepend(str(tmp_path / "fake"))
+
+    urdf = tmp_path / "valid.urdf"
+    urdf.write_text(_MINIMAL_URDF)
+    try:
+        report = validate_urdf(urdf)
+    finally:
+        # Drop the fake package so later tests import the real one (if any).
+        for name in [m for m in sys.modules if m == "ManipulaPy" or m.startswith("ManipulaPy.")]:
+            del sys.modules[name]
+
+    assert report.ok is False
+    assert report.error is not None
+    assert "ManipulaPy failed to load" in report.error
+    assert "simulated native-library failure" in report.error
+    assert report.trace is not None and "RuntimeError" in report.trace
 
 
 @pytest.mark.slow

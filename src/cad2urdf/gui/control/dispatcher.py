@@ -63,7 +63,9 @@ class CommandDispatcher:
                 "GUI is shutting down; command was not executed",
             )
         command = message.get("command")
-        if command not in protocol.COMMANDS:
+        # Check the type first: a JSON list/object is unhashable, and the set
+        # lookup would raise out of dispatch instead of returning an envelope.
+        if not isinstance(command, str) or command not in protocol.COMMANDS:
             return protocol.err("unknown_command", f"no such command: {command!r}")
         raw_args = message.get("args")
         args = raw_args if isinstance(raw_args, dict) else {}

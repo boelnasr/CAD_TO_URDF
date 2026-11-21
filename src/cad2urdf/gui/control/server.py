@@ -36,6 +36,9 @@ class ControlServer(QObject):
         self._pending: deque[tuple[QLocalSocket, bytes]] = deque()
         self._dispatching = False
         self._stopping = False
+        # Sockets that disconnected while a handler was on the stack; deleted
+        # once dispatch unwinds (see _on_disconnected).
+        self._deferred_deletes: list[QLocalSocket] = []
         self._server.newConnection.connect(self._on_new_connection)
 
     def start(self) -> None:
@@ -108,7 +111,13 @@ class ControlServer(QObject):
 
     def _on_disconnected(self, conn: QLocalSocket) -> None:
         self._buffers.pop(conn, None)
-        conn.deleteLater()
+        if self._dispatching:
+            # A handler's nested event loop would run deleteLater() at once,
+            # freeing this socket while the readyRead emission that started the
+            # dispatch is still on the stack.
+            self._deferred_deletes.append(conn)
+        else:
+            conn.deleteLater()
 
     def _on_ready_read(self, conn: QLocalSocket) -> None:
         if conn not in self._buffers:
@@ -149,7 +158,9 @@ class ControlServer(QObject):
                         "shutting_down",
                         "GUI is shutting down; command was not completed",
                     )
-                self._write_response(conn, response)
+                # The client may have left while the handler ran; nobody to answer.
+                if conn in self._buffers:
+                    self._write_response(conn, response)
                 if self._stopping:
                     self._reject_pending()
                     break
@@ -160,6 +171,8 @@ class ControlServer(QObject):
                         self._collect_available(open_conn)
         finally:
             self._dispatching = False
+            while self._deferred_deletes:
+                self._deferred_deletes.pop().deleteLater()
             if self._stopping:
                 self._finish_stop()
 
@@ -168,4 +181,8 @@ class ControlServer(QObject):
             message = protocol.decode(raw.decode("utf-8"))
         except (protocol.ProtocolError, UnicodeDecodeError) as e:
             return protocol.err("protocol_error", str(e))
-        return self._dispatcher.dispatch(message)
+        try:
+            return self._dispatcher.dispatch(message)
+        except Exception as e:  # noqa: BLE001 - an exception in this Qt slot aborts the GUI
+            _log.exception("dispatcher raised instead of returning an envelope")
+            return protocol.err("internal_error", str(e))

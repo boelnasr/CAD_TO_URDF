@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 
@@ -145,3 +146,84 @@ def test_repeated_component_definitions_create_distinct_occurrences(tmp_path: Pa
     assert [edge.child_id for edge in assembly.edges] == ["bolt", "bolt_2"]
     assert assembly.edges[0].relative_pose[0, 3] == pytest.approx(0.0)
     assert assembly.edges[1].relative_pose[0, 3] == pytest.approx(0.02)
+
+
+def _box_at(corner_mm: tuple[float, float, float]) -> Any:
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt
+
+    return BRepPrimAPI_MakeBox(gp_Pnt(*corner_mm), 10.0, 10.0, 10.0).Shape()
+
+
+def _tube() -> Any:
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+
+    return BRepAlgoAPI_Cut(
+        BRepPrimAPI_MakeCylinder(10.0, 30.0).Shape(),
+        BRepPrimAPI_MakeCylinder(5.0, 30.0).Shape(),
+    ).Shape()
+
+
+@pytest.mark.parametrize(
+    ("make_shape", "true_volume_m3"),
+    [
+        pytest.param(lambda: _box_at((20.0, 20.0, 20.0)), 1e-6, id="box_at_+20mm"),
+        pytest.param(lambda: _box_at((-40.0, -40.0, -40.0)), 1e-6, id="box_at_-40mm"),
+        # Hollow cylinder r 10/5 mm, h 30 mm; the faceted mesh undershoots the
+        # true curved volume slightly, so the tolerance is the mesh deflection.
+        pytest.param(_tube, math.pi * (10.0**2 - 5.0**2) * 30.0 * 1e-9, id="tube_r10_r5_h30"),
+    ],
+)
+def test_tessellate_winds_reversed_faces_outward_issue2(
+    make_shape: Callable[[], Any], true_volume_m3: float
+) -> None:
+    """REVERSED faces must be re-wound so the signed volume is placement-independent."""
+    from cad2urdf.core.parsers.caf import tessellate
+
+    mesh = tessellate(make_shape())
+
+    assert mesh.is_watertight
+    assert mesh.is_winding_consistent
+    assert mesh.volume == pytest.approx(true_volume_m3, rel=1e-2)
+
+
+def test_untessellable_part_error_names_file_and_part_issue24(tmp_path: Path) -> None:
+    """A sketch/wire-only part must be reported by file and part name."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.gp import gp_Pnt, gp_Trsf
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPCAFControl import STEPCAFControl_Writer
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_Name
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+    from cad2urdf.core.parsers.step import load_step_assembly_with_shapes
+
+    doc = TDocStd_Document(TCollection_ExtendedString("MDTV-XCAF"))
+    XCAFDoc_DocumentTool.Set_s(doc.Main())
+    tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+    body = tool.AddShape(BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape(), False)
+    sketch = tool.AddShape(
+        BRepBuilderAPI_MakeEdge(gp_Pnt(0.0, 0.0, 0.0), gp_Pnt(10.0, 0.0, 0.0)).Edge(), False
+    )
+    asm = tool.NewShape()
+    for label, name in ((body, "body"), (sketch, "axis_sketch"), (asm, "robot")):
+        TDataStd_Name.Set_s(label, TCollection_ExtendedString(name))
+    for label in (body, sketch):
+        tool.AddComponent(asm, label, TopLoc_Location(gp_Trsf()))
+    tool.UpdateAssemblies()
+    path = tmp_path / "with_sketch.step"
+    writer = STEPCAFControl_Writer()
+    writer.Transfer(doc)
+    assert writer.Write(str(path)) == IFSelect_RetDone
+
+    with pytest.raises(ValueError) as excinfo:
+        load_step_assembly_with_shapes(path)
+
+    message = str(excinfo.value)
+    assert "with_sketch.step" in message
+    assert "axis_sketch" in message

@@ -26,7 +26,29 @@ class Bridge:
         self._gui: GuiProcess | None = None
         self._client: ControlClient | None = None
 
+    def _reset(self) -> None:
+        """Forget a dead GUI so the next call lazily spawns a fresh one."""
+        client, gui = self._client, self._gui
+        self._client = None
+        self._gui = None
+        try:
+            if client is not None:
+                client.close()
+        finally:
+            if gui is not None:
+                gui.stop()
+
     def _ensure_started(self) -> None:
+        # The user may close the window (or the GUI may crash) between calls.
+        if self._gui is not None and not self._gui.is_running():
+            self._reset()
+            # Respawning silently would hand the agent an empty document that a
+            # later save/export would happily persist; report the loss once and
+            # let the retry start a fresh GUI.
+            raise RuntimeError(
+                "GUI not running: the window was closed or crashed and its unsaved "
+                "document is lost; call again to start a fresh GUI"
+            )
         if self._gui is None:
             gui = GuiProcess(socket_path=self._socket_path)
             client: ControlClient | None = None
@@ -50,7 +72,12 @@ class Bridge:
         self._ensure_started()
         if self._client is None:
             raise RuntimeError("Bridge client not connected; startup may have failed")
-        resp = self._client.send(command, args)
+        try:
+            resp = self._client.send(command, args)
+        except OSError as e:
+            # The GUI died after the liveness check; reset so a retry respawns.
+            self._reset()
+            raise RuntimeError(f"GUI not running: {e}") from e
         if not resp.get("ok"):
             raise RuntimeError(f"{resp.get('error')}: {resp.get('detail')}")
         return resp["result"]

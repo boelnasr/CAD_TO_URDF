@@ -46,6 +46,16 @@ def validate_urdf(urdf_path: Path) -> ValidationReport:
                 "Install via `pip install -e .[urdf-io]` to enable validation."
             ),
         )
+    except Exception as e:
+        # Import-time failures other than "not installed" (native-library OSError,
+        # numba RuntimeError, ...) must still yield a report: callers treat
+        # validation as advisory, and the CLI would otherwise roll back the package.
+        return ValidationReport(
+            urdf_path=urdf_path,
+            ok=False,
+            error=f"ManipulaPy failed to load: {e}",
+            trace=traceback.format_exc(),
+        )
 
     try:
         proc = URDFToSerialManipulator(str(urdf_path))

@@ -1,3 +1,5 @@
+import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +17,7 @@ from cad2urdf.core.kinematic.tree import (
     parent_of,
     remove_link,
     reparent_joint,
+    set_base_link,
 )
 
 
@@ -157,3 +160,44 @@ def test_add_link_does_not_share_references() -> None:
     assert r2.links["d"].origin[0, 3] == 0.0, (
         "add_link stored a reference instead of a copy; external mutation leaked in"
     )
+
+
+def test_reparent_joint_rejects_cycle_issue7() -> None:
+    """Moving joint ab under c (a descendant of b) would close the loop b -> c -> b."""
+    r = _three_link_robot()
+    with pytest.raises(ValueError, match=r"cycle"):
+        reparent_joint(r, "ab", new_parent="c")
+    # input untouched
+    assert r.joints["ab"].parent == "a"
+
+
+def _run_with_timeout(fn: Callable[[], object], timeout_s: float = 1.0) -> BaseException | None:
+    """Run ``fn`` on a daemon thread so an infinite loop fails the test instead of hanging it."""
+    outcome: list[BaseException | None] = []
+
+    def target() -> None:
+        try:
+            fn()
+        except BaseException as exc:  # noqa: BLE001 - handed back to the test thread
+            outcome.append(exc)
+        else:
+            outcome.append(None)
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(timeout_s)
+    assert not worker.is_alive(), "set_base_link did not terminate on a cyclic graph"
+    return outcome[0]
+
+
+def test_set_base_link_rejects_cyclic_graph_issue7() -> None:
+    """A 2-cycle (a -> b, b -> a) must raise instead of walking parents forever."""
+    r = Robot(
+        name="r",
+        base_link="base",
+        links={"base": _mk_link("base"), "a": _mk_link("a"), "b": _mk_link("b")},
+        joints={"ab": _mk_joint("ab", "a", "b"), "ba": _mk_joint("ba", "b", "a")},
+    )
+    exc = _run_with_timeout(lambda: set_base_link(r, "a"))
+    assert isinstance(exc, ValueError)
+    assert "cycle" in str(exc)

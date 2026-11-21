@@ -21,21 +21,41 @@ def compute_inertial(
 ) -> tuple[float, NDArray[Any], NDArray[Any]]:
     """Return (mass, com_3, inertia_3x3). Override fields take precedence.
 
-    Non-watertight meshes fall back to convex-hull approximation with a logged warning.
+    Only valid closed volumes are integrated. A watertight, consistently wound
+    but inside-out mesh is inverted (on a copy). Non-watertight or
+    inconsistently wound meshes fall back to convex-hull approximation with a
+    logged warning. The input mesh is never mutated.
     """
     if density <= 0:
         raise ValueError(f"density must be positive, got {density}")
 
+    mesh_name = getattr(mesh, "metadata", {}).get("file_name", "<unnamed>")
+    hull_reason: str | None = None
     if not mesh.is_watertight:
+        hull_reason = "non-watertight"
+    else:
+        if mesh.is_winding_consistent and mesh.volume < 0:
+            # Mirrored CAD parts are often exported inside-out; integrating
+            # them as-is yields negative mass and inertia.
+            mesh = mesh.copy()
+            mesh.invert()
+        if not mesh.is_volume:
+            # Flipped triangles make trimesh's signed-volume integration
+            # silently wrong (e.g. half the mass with a shifted COM).
+            hull_reason = "not a valid volume (inconsistent winding)"
+
+    if hull_reason is not None:
         log.warning(
-            "mesh %s is non-watertight; falling back to convex hull for inertia",
-            getattr(mesh, "metadata", {}).get("file_name", "<unnamed>"),
+            "mesh %s is %s; falling back to convex hull for inertia",
+            mesh_name,
+            hull_reason,
         )
         try:
             mesh = mesh.convex_hull
         except Exception as e:  # QhullError or anything else
             log.error(
-                "convex hull failed for non-watertight mesh: %s. Returning zero-mass fallback.",
+                "convex hull failed for %s mesh: %s. Returning zero-mass fallback.",
+                hull_reason,
                 e,
             )
             zero_com = np.zeros(3)
