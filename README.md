@@ -620,10 +620,11 @@ pytest -m slow                        # ManipulaPy validation tests (need [urdf-
 ### Type-check
 
 ```bash
-mypy                                  # strict mode on src/cad2urdf/core/
+mypy                                  # strict mode on src/cad2urdf/{core,gui,mcp}/
 ```
 
-The type checker is clean on every committed revision; CI enforces this gate.
+`gui/` is checked with a few error codes relaxed for PyQt6 stub noise (see the
+`[[tool.mypy.overrides]]` in `pyproject.toml`). CI enforces this gate.
 
 ### Continuous integration
 

@@ -84,6 +84,9 @@ ignore_missing_imports = true
 # we type-check it leniently for now (warn but don't require disallow_untyped_defs).
 # PyQt6 stubs declare statusBar()/addToolBar()/model() as `Foo | None` even though
 # they never return None in practice, so union-attr noise is silenced for gui.
+# PyQt6 >= 6.12 stubs declare pyqtSignal(..., arguments: Sequence[str]) with no
+# default, so every `pyqtSignal(object)` reports call-arg; 6.11 and the runtime
+# don't require it. A per-line ignore would trip warn_unused_ignores on <= 6.11.
 [[tool.mypy.overrides]]
 module = ["cad2urdf.gui.*"]
 disallow_untyped_defs = false
@@ -96,4 +99,5 @@ disable_error_code = [
     "arg-type",
     "has-type",
     "no-any-return",
+    "call-arg",
 ]
