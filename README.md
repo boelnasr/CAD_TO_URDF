@@ -237,6 +237,8 @@ flowchart LR
 
 > **CAD project assets.** Saving a project copies all available referenced
 > meshes into a `<project-name>_assets` directory beside the `.cad2urdf` file.
+> If a folder with that name already exists and cad2urdf did not create it,
+> saving stops with an error instead of replacing it.
 > Keep that directory with the project when moving or sharing it; paths inside
 > the project are resolved relative to the project file when it is reopened.
 
