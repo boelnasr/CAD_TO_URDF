@@ -88,3 +88,54 @@ def test_changing_material_pushes_link_update(qtbot, base_stl) -> None:
     link = c.current().links["base"]
     assert link.material_name == "steel_1018"
     assert link.material_density == pytest.approx(7850.0)
+
+
+def _robot_with_frame_root(stl: Path) -> Robot:
+    """The shape every STEP/IGES import produces: a meshless assembly root."""
+    from cad2urdf.core.kinematic.model import Joint
+
+    return Robot(
+        name="r",
+        base_link="asm",
+        links={
+            "asm": Link("asm", None, None, None, None, InertialOverride()),
+            "arm": _mk_link_with_real_mesh("arm", stl),
+        },
+        joints={
+            "j": Joint("j", "fixed", "asm", "arm", np.array([1.0, 0.0, 0.0])),
+        },
+    )
+
+
+def test_show_frame_link_disables_editor_issue5(qtbot, base_stl) -> None:
+    """A raise here happens inside a Qt slot, where PyQt6 aborts the whole GUI."""
+    from cad2urdf.gui.panels.inertia_editor import InertiaEditorDock
+    from cad2urdf.gui.state.controller import RobotController
+
+    c = RobotController()
+    c.replace(_robot_with_frame_root(base_stl))
+    dock = InertiaEditorDock(c)
+    qtbot.addWidget(dock)
+    dock.show_link("arm")
+    assert dock.widget().isEnabled()
+
+    dock.show_link("asm")
+
+    assert not dock.widget().isEnabled()
+    assert dock.auto_mass_label.text() == "-"
+
+
+def test_recompute_on_frame_link_does_not_raise_issue5(qtbot, base_stl) -> None:
+    from cad2urdf.gui.panels.inertia_editor import InertiaEditorDock
+    from cad2urdf.gui.state.controller import RobotController
+
+    c = RobotController()
+    c.replace(_robot_with_frame_root(base_stl))
+    dock = InertiaEditorDock(c)
+    qtbot.addWidget(dock)
+    # Reach the slot with a frame link selected, as a stale selection would.
+    dock._link_name = "asm"
+
+    dock._on_recompute()
+
+    assert dock._worker is None
