@@ -145,8 +145,12 @@ def reparent_joint(robot: Robot, joint_name: str, new_parent: str) -> Robot:
 def set_base_link(robot: Robot, new_base: str) -> Robot:
     """Re-root the tree at ``new_base`` by reversing joints along the path to the old base.
 
-    Exact for fixed joints; for actuated joints the axis vector is preserved
-    (motion sign may flip). Re-root before assigning joint types/axes.
+    Each reversed joint gets the inverse origin and its axis re-expressed in
+    the new child frame (the old parent frame) and negated, so the same joint
+    coordinate q yields the inverse motion and the limits carry over unchanged.
+    This is exact for fixed and prismatic joints, and for revolute/continuous
+    joints whenever the origin translation lies on the axis line, which always
+    holds for CAD-inferred joints.
     """
     if new_base not in robot.links:
         raise ValueError(f"link {new_base!r} not in robot")
@@ -175,12 +179,15 @@ def set_base_link(robot: Robot, new_base: str) -> Robot:
             jn for jn, j in work.joints.items() if j.parent == parent and j.child == child
         )
         j = work.joints[jname]
+        # URDF axes live in the joint (child) frame. After reversal the child is
+        # the old parent, so rotate the axis into that frame; negating it makes
+        # T_rev(q) == inv(T_fwd(q)), matching extract/spanning_tree.py.
         work.joints[jname] = Joint(
             name=j.name,
             type=j.type,
             parent=child,
             child=parent,
-            axis=j.axis,
+            axis=-(j.origin[:3, :3] @ j.axis),
             origin=np.linalg.inv(j.origin),
             limit_lower=j.limit_lower,
             limit_upper=j.limit_upper,
