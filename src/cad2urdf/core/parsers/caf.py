@@ -28,7 +28,7 @@ def tessellate(shape: Any, *, unit_scale: float = 0.001) -> trimesh.Trimesh:
     """Triangulate an OCCT shape into a trimesh, scaling vertices by unit_scale."""
     from OCP.BRep import BRep_Tool
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
-    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED
     from OCP.TopExp import TopExp_Explorer
     from OCP.TopLoc import TopLoc_Location
     from OCP.TopoDS import TopoDS
@@ -44,11 +44,17 @@ def tessellate(shape: Any, *, unit_scale: float = 0.001) -> trimesh.Trimesh:
         if tri is not None:
             trsf = loc.Transformation()
             base = len(verts)
+            # OCCT stores a face's triangulation in its underlying surface's
+            # orientation; a REVERSED face must be re-wound or its triangles
+            # point inward and the signed volume becomes placement-dependent.
+            reversed_face = face.Orientation() == TopAbs_REVERSED
             for i in range(1, tri.NbNodes() + 1):
                 p = tri.Node(i).Transformed(trsf)
                 verts.append((p.X() * unit_scale, p.Y() * unit_scale, p.Z() * unit_scale))
             for i in range(1, tri.NbTriangles() + 1):
                 a, b, c = tri.Triangle(i).Get()
+                if reversed_face:
+                    b, c = c, b
                 faces.append((base + a - 1, base + b - 1, base + c - 1))
         exp.Next()
     if not faces:
@@ -165,7 +171,14 @@ def load_caf_assembly(
 
                 shape = shape.Located(TopLoc_Location())
             shapes[node_id] = shape
-            mesh = tessellate(shape, unit_scale=unit_scale)
+            try:
+                mesh = tessellate(shape, unit_scale=unit_scale)
+            except ValueError as e:
+                # Sketches and free curves are common in CAD exports; name the
+                # offending part so the user knows what to remove.
+                raise ValueError(
+                    f"{path}: part {node_id!r} has no tessellable geometry"
+                ) from e
         parts.append(StepPart(id=node_id, name=node_id, mesh=mesh, is_leaf=not is_assembly))
         if is_assembly:
             components = TDF_LabelSequence()
