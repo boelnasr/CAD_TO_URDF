@@ -221,6 +221,7 @@ class MainWindow(QMainWindow):
 
     # ---- validate action ---------------------------------------------------
     def _on_validate_clicked(self) -> None:
+        import shutil
         import tempfile
 
         from cad2urdf.gui.workers.base import Worker
@@ -232,20 +233,31 @@ class MainWindow(QMainWindow):
             build_validate_job(
                 robot=robot,
                 out_dir=scratch,
-                package_name=f"{robot.name}_pkg",
-                urdf_relname=f"{robot.name}.urdf",
+                # The scratch package is internal, so it must not inherit the
+                # robot name: 'UR5_pkg' fails the ROS package-name rule.
+                package_name="cad2urdf_validate",
+                urdf_relname="robot.urdf",
                 run_manipulapy=True,
             )
         )
         worker.finished.connect(self._on_validate_done)
-        worker.failed.connect(
-            lambda err, _t: self.statusBar().showMessage(f"validate failed: {err}", 8000)
-        )
+        worker.failed.connect(self._on_validate_failed)
+        # The scratch package only feeds the validators; nothing reads it after.
+        worker.finished.connect(lambda _report: shutil.rmtree(scratch, ignore_errors=True))
+        worker.failed.connect(lambda _err, _trace: shutil.rmtree(scratch, ignore_errors=True))
+        # A second click would rebind _validate_worker, letting the running
+        # QThread be garbage-collected, which makes Qt abort the process.
+        self.action_validate.setEnabled(False)
         self.statusBar().showMessage("validating…", 8000)
         worker.start()
         self._validate_worker = worker  # keep a reference alive
 
+    def _on_validate_failed(self, err: str, _trace: str) -> None:
+        self.action_validate.setEnabled(True)
+        self.statusBar().showMessage(f"validate failed: {err}", 8000)
+
     def _on_validate_done(self, report: object) -> None:
+        self.action_validate.setEnabled(True)
         ast_n = len(report.ast_issues)  # type: ignore[attr-defined]
         if report.manipulapy_ok is True:  # type: ignore[attr-defined]
             self.statusBar().showMessage(
