@@ -435,10 +435,15 @@ def _travel_limits(
             parent_high = float(np.max(parent_projection))
             child_low = float(np.min(child_projection))
             child_high = float(np.max(child_projection))
+            # Sibling parent/child roles follow part-name order, so either
+            # face may be the shorter one. Travel keeps the shorter face
+            # inside the longer one in both cases.
             if child_high - child_low > parent_high - parent_low + LINEAR_TOLERANCE_M:
-                return None, None
-            lower_candidates.append(parent_low - child_low)
-            upper_candidates.append(parent_high - child_high)
+                lower_candidates.append(parent_high - child_high)
+                upper_candidates.append(parent_low - child_low)
+            else:
+                lower_candidates.append(parent_low - child_low)
+                upper_candidates.append(parent_high - child_high)
     if not lower_candidates:
         return None, None
     lower = max(lower_candidates)
