@@ -150,8 +150,10 @@ def test_rviz_config_uses_base_link_name(tmp_path: Path) -> None:
         maintainer_email="m@e.com",
         base_link_name="cube_a",
     )
-    rviz = (out / "rviz" / "display.rviz").read_text()
-    assert "Fixed Frame: cube_a" in rviz
+    import yaml
+
+    rviz = yaml.safe_load((out / "rviz" / "display.rviz").read_text())
+    assert rviz["Visualization Manager"]["Global Options"]["Fixed Frame"] == "cube_a"
 
 
 # ---------------------------------------------------------------------------
@@ -230,3 +232,25 @@ def test_scaffold_xml_escapes_maintainer_email_attr(tmp_path: Path) -> None:
     assert "email='evil\"injection'" in xml
     # The broken double-quoted form must not appear
     assert 'email="evil"injection"' not in xml
+
+
+def test_scaffold_survives_yaml_special_base_link_name_issue26(tmp_path: Path) -> None:
+    """Link names come from STL stems, so ' #' and ': ' can appear. Unquoted, the
+    RViz Fixed Frame is truncated at the YAML comment; and launch_ros YAML-parses
+    an untyped Command() result, so robot_description must be forced to str."""
+    import yaml
+
+    out = tmp_path / "pkg"
+    scaffold_ros_package(
+        out_dir=out,
+        package_name="mypkg",
+        urdf_relpath=Path("urdf/r.urdf"),
+        maintainer_name="m",
+        maintainer_email="m@e.com",
+        base_link_name="base #1: x",
+    )
+    rviz = yaml.safe_load((out / "rviz" / "display.rviz").read_text())
+    assert rviz["Visualization Manager"]["Global Options"]["Fixed Frame"] == "base #1: x"
+    launch = (out / "launch" / "display.launch.py").read_text()
+    assert "ParameterValue(" in launch
+    assert "value_type=str" in launch
