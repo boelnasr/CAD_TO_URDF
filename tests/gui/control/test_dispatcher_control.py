@@ -58,3 +58,16 @@ def test_dispatcher_rejects_commands_after_shutdown_begins(qapp):
     assert response["ok"] is False
     assert response["error"] == "shutting_down"
     assert called == []
+
+
+@pytest.mark.parametrize("command", [["gui_status"], {"a": 1}])
+def test_unhashable_command_returns_unknown_command_issue19(qapp, command):
+    # A list/dict 'command' used to raise TypeError out of dispatch, which
+    # aborts the GUI when it escapes a Qt slot.
+    _ = qapp
+    dispatcher = CommandDispatcher(RobotController())
+
+    response = dispatcher.dispatch({"command": command, "args": {}})
+
+    assert response["ok"] is False
+    assert response["error"] == "unknown_command"

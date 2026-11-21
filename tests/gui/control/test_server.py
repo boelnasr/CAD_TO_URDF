@@ -265,3 +265,89 @@ def test_shutdown_rejects_queued_commands_before_releasing_blocked_import(
         sock.disconnectFromServer()
         server.stop()
         controller.shutdown()
+
+
+def test_server_wraps_dispatcher_exception_in_err_envelope_issue19(qapp, tmp_path):
+    """A raising dispatcher must yield an err line, not an exception in the slot."""
+
+    class _RaisingDispatcher:
+        def dispatch(self, message):
+            raise TypeError("unhashable type: 'list'")
+
+        def begin_shutdown(self):
+            pass
+
+    name = str(tmp_path / "raising.sock")
+    server = ControlServer(_RaisingDispatcher(), name)  # type: ignore[arg-type]
+    server.start()
+    try:
+        resp = _request(qapp, name, {"command": ["gui_status"], "args": {}})
+        assert resp["ok"] is False
+        assert resp["error"] == "internal_error"
+        assert "unhashable" in resp["detail"]
+    finally:
+        server.stop()
+
+
+def test_client_disconnect_during_nested_loop_drops_response_issue20(qapp, tmp_path):
+    """The client may vanish while a handler (import_cad) spins a nested loop.
+
+    That loop used to delete the connection's QLocalSocket while its readyRead
+    emission was still on the stack, then the response was written to the freed
+    object: a RuntimeError in a Qt slot (GUI abort) or a segfault.
+    """
+    from PyQt6 import sip
+    from PyQt6.QtCore import QEventLoop, QTimer
+
+    from cad2urdf.gui.control import protocol
+
+    name = str(tmp_path / "vanish.sock")
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    seen: dict[str, bool] = {"entered": False, "disconnect_in_loop": False}
+    conns: list[QLocalSocket] = []
+
+    class _NestedLoopDispatcher:
+        """Stands in for import_cad's nested worker loop."""
+
+        def dispatch(self, message):
+            if message["command"] != "import_cad":
+                return protocol.ok({"pong": True})
+            seen["entered"] = True
+            conns.extend(server._buffers)
+            client.close()  # the MCP process dies mid-import
+            loop = QEventLoop()
+            deadline = time.monotonic() + 1.0
+
+            def poll() -> None:
+                if not any(c in server._buffers for c in conns):
+                    seen["disconnect_in_loop"] = True
+                    # A few more iterations, so a deleteLater() posted by the
+                    # disconnect handler gets its chance to run in this loop.
+                    QTimer.singleShot(20, loop.quit)
+                elif time.monotonic() > deadline:
+                    loop.quit()
+                else:
+                    QTimer.singleShot(5, poll)
+
+            QTimer.singleShot(0, poll)
+            loop.exec()
+            return protocol.ok({"imported": True})
+
+        def begin_shutdown(self):
+            pass
+
+    server = ControlServer(_NestedLoopDispatcher(), name)  # type: ignore[arg-type]
+    server.start()
+    try:
+        client.connect(name)
+        client.sendall(b'{"command": "import_cad", "args": {"path": "x.step"}}\n')
+        assert _pump_until(qapp, lambda: seen["entered"]), "handler never ran"
+        assert seen["disconnect_in_loop"], "disconnect was not handled during dispatch"
+        # The vanished connection is still cleaned up once the handler returns.
+        assert _pump_until(qapp, lambda: all(sip.isdeleted(c) for c in conns))
+
+        resp = _request(qapp, name, {"command": "gui_status", "args": {}})
+        assert resp == {"ok": True, "result": {"pong": True}}
+    finally:
+        client.close()
+        server.stop()
