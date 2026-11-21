@@ -79,9 +79,11 @@ pip install -e ".[dev,urdf-io]"
 ```
 
 Adds the user's [ManipulaPy](https://github.com/boelnasr/ManipulaPy) library
-(~3 GB transitive deps including PyTorch + CUDA wheels), enabling the post-emit
-URDF validation gate. Without this extra, the CLI's `--no-validate` flag is
-required (or you get a clean "ManipulaPy not installed" message and continue).
+(>= 1.4.2; its core deps are numpy, scipy, matplotlib, numba and pillow), enabling
+the post-emit URDF validation gate. Older releases printed a banner to stdout on
+import, which breaks the MCP server's JSON-RPC stream. Without this extra, the
+CLI's `--no-validate` flag is required (or you get a clean "ManipulaPy not
+installed" message and continue).
 
 ### ROS 2 Humble PYTHONPATH gotcha
 
