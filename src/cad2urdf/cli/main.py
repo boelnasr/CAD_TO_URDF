@@ -322,6 +322,22 @@ def main(argv: list[str] | None = None) -> int:
                 joints=cfg.joints,
                 materials=cfg.materials,
             )
+
+        # Each input becomes a link named after its stem and is written to
+        # meshes/visual/<stem>.stl, so a shared stem would overwrite one mesh and
+        # drop a link. Casefold too: on NTFS/APFS "Link" and "link" are one file.
+        seen_stems: dict[str, Path] = {}
+        for inp in args.inputs:
+            key = inp.stem.casefold()
+            if key in seen_stems:
+                print(
+                    f"error: inputs {seen_stems[key]} and {inp} share the link name "
+                    f"{inp.stem!r} (link names come from file stems, compared "
+                    "case-insensitively); rename one of them",
+                    file=sys.stderr,
+                )
+                return 2
+            seen_stems[key] = inp
     package_name = args.package_name or args.out.name
 
     # ------------------------------------------------------------------
