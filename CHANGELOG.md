@@ -3,7 +3,13 @@
 All notable user-facing changes to `cad2urdf` are documented here. This project
 follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.0] - 2026-11-22
+
+### Added
+
+- README: an animated demo of the GUI building the KUKA LBR iiwa14, recorded
+  headlessly by `scripts/record_demo.py` so it can be regenerated after UI
+  changes (#31).
 
 ### Changed
 

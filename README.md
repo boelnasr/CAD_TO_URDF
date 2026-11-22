@@ -6,7 +6,7 @@
 
 STL / OBJ meshes or a STEP / IGES assembly in. URDF, meshes, inertia, launch file and RViz config out.
 
-[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-436%20passed-brightgreen)](#development) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![ROS 2](https://img.shields.io/badge/ROS%202-Humble-22314E)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v1.0.0-brightgreen)](#status--roadmap)
+[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-436%20passed-brightgreen)](#development) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![ROS 2](https://img.shields.io/badge/ROS%202-Humble-22314E)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v1.1.0-brightgreen)](#status--roadmap)
 
 <img src="docs/assets/demo.gif" width="900" alt="The cad2urdf GUI building a KUKA LBR iiwa14: eight link meshes are imported, chained by seven revolute joints until the arm stands assembled, orbited in the 3D viewport, given mass and inertia from aluminium, and exported as a ROS 2 package">
 
@@ -33,7 +33,8 @@ STL / OBJ meshes or a STEP / IGES assembly in. URDF, meshes, inertia, launch fil
 
 | Version | Status | Scope |
 |---|---|---|
-| **v1.0.0** (current) | shipped | STEP + IGES assembly import across CLI, GUI, and MCP, with conservative geometry-based inference of continuous/prismatic joints and a safe fixed fallback |
+| **v1.1.0** (current) | shipped | 28 bug fixes (#2–#28, #30): correct STEP/IGES and fallback inertia, exact joint axes after re-rooting, safe project saves, GUI and MCP crash fixes; `scipy` core dependency; ManipulaPy ≥ 1.4.2; README demo GIF |
+| v1.0.0 | shipped | STEP + IGES assembly import across CLI, GUI, and MCP, with conservative geometry-based inference of continuous/prismatic joints and a safe fixed fallback |
 | v0.2.0a0 | shipped | PyQt6/VTK GUI, end-to-end MCP control, and STEP assembly import |
 | v0.1.0a0 | shipped | CLI core: STL/OBJ in, full ROS package out, ManipulaPy validation gate |
 | v2.x | planned | Planar-joint inference and optional natural-language priors |
@@ -48,7 +49,7 @@ and the [changelog](CHANGELOG.md).
 
 ## Install
 
-### Pip-only path (recommended for v1.0.0)
+### Pip-only path (recommended for v1.1.0)
 
 ```bash
 python3.10 -m venv .venv
