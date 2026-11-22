@@ -1,17 +1,31 @@
+<div align="center">
+
 # cad2urdf
 
-Convert CAD assemblies into ROS 2-ready URDF packages.
+**From CAD to a launch-ready ROS 2 robot, without a CAD plugin.**
 
-[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-436%20passed-brightgreen)](#development) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v1.0.0-brightgreen)](#status--roadmap)
+STL / OBJ meshes or a STEP / IGES assembly in. URDF, meshes, inertia, launch file and RViz config out.
 
-`cad2urdf` takes mesh files (STL or OBJ) plus a YAML joint description, or a
-STEP/IGES assembly (`.stp`/`.step`/`.igs`/`.iges`, via the `[step]` extra) whose
-named parts, poses, and conservative joint hypotheses are read directly. It
-emits a complete ROS 2 ament_cmake package — URDF + meshes
-+ `package.xml` + `CMakeLists.txt` + `launch/display.launch.py` + `rviz/display.rviz`
-— ready to drop into a workspace and view in RViz. Inertia is auto-computed
-from each mesh using a user-supplied material density, validated by the user's
-[ManipulaPy](https://github.com/boelnasr/ManipulaPy) URDF parser.
+[![CI](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml/badge.svg)](https://github.com/boelnasr/CAD_TO_URDF/actions/workflows/ci.yml) [![tests](https://img.shields.io/badge/tests-436%20passed-brightgreen)](#development) [![python](https://img.shields.io/badge/python-3.10%2B-blue)](#install) [![ROS 2](https://img.shields.io/badge/ROS%202-Humble-22314E)](#install) [![license](https://img.shields.io/badge/license-MIT-blue)](#license) [![status](https://img.shields.io/badge/status-v1.1.0-brightgreen)](#status--roadmap)
+
+<img src="docs/assets/demo.gif" width="900" alt="The cad2urdf GUI building a KUKA LBR iiwa14: eight link meshes are imported, chained by seven revolute joints until the arm stands assembled, orbited in the 3D viewport, given mass and inertia from aluminium, and exported as a ROS 2 package">
+
+<sub>The real GUI building a KUKA LBR iiwa14, recorded headlessly by <a href="scripts/record_demo.py"><code>scripts/record_demo.py</code></a>.</sub>
+
+[Install](#install) · [Quick Start](#quick-start) · [GUI](#gui-desktop-app) · [MCP Server](#mcp-server-drive-the-gui-from-claude) · [CLI](#cli-reference) · [Algorithms](#algorithms)
+
+</div>
+
+## Highlights
+
+| | |
+|---|---|
+| 🧩 **Bring any CAD** | One STL/OBJ per link plus a short YAML joint list, or a whole STEP/IGES assembly with its named parts and poses. No SolidWorks, Fusion or Onshape seat needed. |
+| 🔍 **Joints inferred from geometry** | For STEP/IGES, conservative B-rep analysis proposes continuous and prismatic joints from coaxial cylinders and enclosed guides. Anything ambiguous stays fixed for you to review. |
+| ⚖️ **Physics included** | Mass, COM and inertia computed from every mesh and a material density, optionally cross-checked by the [ManipulaPy](https://github.com/boelnasr/ManipulaPy) URDF parser. |
+| 🖥️ **Desktop GUI** | Link tree, joint editor, inertia editor and a live 3D viewport at the forward-kinematic pose, with full undo/redo. |
+| 🤖 **Agent-ready** | An MCP server lets Claude or another MCP client drive the same GUI you use, live and undoable. |
+| 📦 **ROS 2 package out** | `package.xml`, `CMakeLists.txt`, URDF with `package://` meshes, `launch/display.launch.py` and an RViz config, ready to drop into a colcon workspace. |
 
 ---
 
@@ -19,7 +33,8 @@ from each mesh using a user-supplied material density, validated by the user's
 
 | Version | Status | Scope |
 |---|---|---|
-| **v1.0.0** (current) | shipped | STEP + IGES assembly import across CLI, GUI, and MCP, with conservative geometry-based inference of continuous/prismatic joints and a safe fixed fallback |
+| **v1.1.0** (current) | shipped | 28 bug fixes (#2–#28, #30): correct STEP/IGES and fallback inertia, exact joint axes after re-rooting, safe project saves, GUI and MCP crash fixes; `scipy` core dependency; ManipulaPy ≥ 1.4.2; README demo GIF |
+| v1.0.0 | shipped | STEP + IGES assembly import across CLI, GUI, and MCP, with conservative geometry-based inference of continuous/prismatic joints and a safe fixed fallback |
 | v0.2.0a0 | shipped | PyQt6/VTK GUI, end-to-end MCP control, and STEP assembly import |
 | v0.1.0a0 | shipped | CLI core: STL/OBJ in, full ROS package out, ManipulaPy validation gate |
 | v2.x | planned | Planar-joint inference and optional natural-language priors |
@@ -34,7 +49,7 @@ and the [changelog](CHANGELOG.md).
 
 ## Install
 
-### Pip-only path (recommended for v1.0.0)
+### Pip-only path (recommended for v1.1.0)
 
 ```bash
 python3.10 -m venv .venv
@@ -641,6 +656,18 @@ are exercised, and runs the GUI/CAD tests headless under `xvfb` with
 `QT_QPA_PLATFORM=offscreen` + `PYVISTA_OFF_SCREEN=true`.
 Generated STEP and IGES fixtures exercise both CAD readers and the inference
 path without committing large binary fixtures.
+
+### Regenerate the demo GIF
+
+The GIF at the top of this README is recorded from the real GUI, headlessly. The
+script drives `MainWindow` through the same command layer the MCP server uses,
+reads the iiwa14 joints from `examples/`, and needs Pillow only for itself:
+
+```bash
+uv run --with pillow python scripts/record_demo.py   # writes docs/assets/demo.gif
+```
+
+Re-run it after UI changes so the README never shows a stale interface.
 
 ### Project layout
 
